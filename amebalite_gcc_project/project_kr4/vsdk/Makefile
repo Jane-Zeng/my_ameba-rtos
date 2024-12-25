@@ -84,6 +84,7 @@ all: prebuild copy_ld_ram make_subdirs linker_image2 code_analyze
 image2: prebuild copy_ld_img2 make_subdirs linker_image2 code_analyze
 ucps_image2: prebuild copy_ld_img2 make_subdirs linker_image2 code_analyze
 analysis_extract: code_extract
+toolchain: download_toolchain
 #*****************************************************************************#
 #                      RULES TO CREATE DIRECTORY                              #
 #*****************************************************************************#
@@ -199,27 +200,67 @@ else
 
 	$(Q)$(IMAGETOOL) $(IMAGE_TARGET_FOLDER)/kr4_image2_all.bin $(BUILD_TYPE) $(DSP_IMAGE_TARGET_DIR)
 endif
-ifeq ($(CONFIG_UPGRADE_BOOTLOADER), y)
-	@if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin ]; then \
-		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all.bin; \
-		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all_ns.bin; \
+
+ifeq ($(CONFIG_FATFS_WITHIN_APP_IMG), y)
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin ] && [ -f $(BASEDIR)/amebalite_gcc_project/fatfs.bin ]; then \
+		mv $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_tmp.bin; \
+		mv $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns.bin $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns_tmp.bin; \
+		$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_tmp.bin 4096; \
+		$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns_tmp.bin 4096; \
+		$(PREPENDTOOL) $(BASEDIR)/amebalite_gcc_project/fatfs.bin  VFS1_FLASH_BASE_ADDR  $(AP_IMAGEDIR)/target_img2.map; \
+		cat $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_tmp.bin $(BASEDIR)/amebalite_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin; \
+		cat $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns_tmp.bin $(BASEDIR)/amebalite_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns.bin; \
 	else \
-		if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin ]; then \
-			$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all.bin; \
-			$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all_ns.bin; \
-		fi \
-	fi
-else
-	@if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin ]; then \
-		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin; \
-		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns.bin; \
-	else \
-		if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin ]; then \
-			$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin; \
-			$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns.bin; \
+		if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin ] && [ -f $(BASEDIR)/amebalite_gcc_project/fatfs.bin ]; then \
+			mv $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_tmp.bin; \
+			mv $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns.bin $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns_tmp.bin; \
+			$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_tmp.bin 4096; \
+			$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns_tmp.bin 4096; \
+			$(PREPENDTOOL) $(BASEDIR)/amebalite_gcc_project/fatfs.bin  VFS1_FLASH_BASE_ADDR  $(AP_IMAGEDIR)/target_img2.map; \
+			cat$(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_tmp.bin $(BASEDIR)/amebalite_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin; \
+			cat$(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns_tmp.bin $(BASEDIR)/amebalite_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns.bin; \
 		fi \
 	fi
 endif
+
+ifeq ($(CONFIG_COMPRESS_OTA_IMG), y)
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin ]; then \
+		$(COMPRESSTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin; \
+		$(COMPRESSTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns.bin; \
+		$(COPY) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_compress.bin $(KM4_BUILDDIR)/asdk/image/tmp_app.bin; \
+		$(COPY) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns_compress.bin $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin; \
+	else \
+		if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin ]; then \
+			$(COMPRESSTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin; \
+			$(COMPRESSTOOL) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns.bin; \
+			$(COPY) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_compress.bin $(KM4_BUILDDIR)/asdk/image/tmp_app.bin; \
+			$(COPY) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns_compress.bin $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin; \
+		fi \
+	fi
+else
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin ]; then \
+		$(COPY) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app.bin $(KM4_BUILDDIR)/asdk/image/tmp_app.bin; \
+		$(COPY) $(KM4_BUILDDIR)/asdk/image/kr4_km4_app_ns.bin $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin; \
+	else \
+		if [ -f $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin ]; then \
+			$(COPY) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app.bin $(KM4_BUILDDIR)/asdk/image/tmp_app.bin; \
+			$(COPY) $(KM4_BUILDDIR)/asdk/image/kr4_km4_dsp_app_ns.bin $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin; \
+		fi \
+	fi
+endif
+ifeq ($(CONFIG_UPGRADE_BOOTLOADER), y)
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/tmp_app.bin ]; then \
+		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/tmp_app.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all.bin; \
+		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all_ns.bin; \
+	fi
+else
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/tmp_app.bin ]; then \
+		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/tmp_app.bin; \
+		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin; \
+	fi
+endif
+	@rm -f $(KM4_BUILDDIR)/asdk/image/tmp_app.bin
+	@rm -f $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin
 	@echo "========== Image manipulating end =========="
 
 code_analyze:
@@ -239,6 +280,14 @@ code_extract:
 	fi
 	@echo "========== Image extract end =========="
 
+download_toolchain:
+ifeq ($(URL), aliyun)
+	@echo "Download toolchain from $(TOOLCHAINURL_ALIYUN)"
+	$(call download_toolchain_func,$(TOOLCHAINURL_ALIYUN))
+else
+	@echo "Download toolchain from $(TOOLCHAINURL)"
+	$(call download_toolchain_func,$(TOOLCHAINURL))
+endif
 #*****************************************************************************#
 #                      RULES TO BUILD COMPILER TIME                           #
 #*****************************************************************************#

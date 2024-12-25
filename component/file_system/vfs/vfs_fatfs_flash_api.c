@@ -1,11 +1,12 @@
 #include "platform_autoconf.h"
 #include "vfs.h"
 #include "vfs_fatfs.h"
-#if FATFS_DISK_FLASH
+#if defined(CONFIG_FATFS_DISK_FLASH) && CONFIG_FATFS_DISK_FLASH
 #include "platform_stdlib.h"
 #include "basic_types.h"
 #include <stdint.h>
 #include "os_wrapper.h"
+#include "diag.h"
 static fatfs_flash_params_t fatfs_flash_param;
 static uint8_t fatfs_flash_init_done = 0;
 static FIL     fatfs_flash_file;
@@ -15,7 +16,7 @@ extern DRESULT FLASH_disk_ioctl(BYTE cmd, void *buff);
 int fatfs_flash_close(void)
 {
 	if (fatfs_flash_init_done) {
-		if (f_mount(NULL, fatfs_flash_param.drv, 1) != FR_OK) {
+		if (f_unmount(fatfs_flash_param.drv) != FR_OK) {
 			VFS_DBG(VFS_ERROR, "FATFS unmount flash logical drive fail.");
 		}
 
@@ -139,4 +140,4 @@ int usb_flash_writeblocks(uint32_t sector, const uint8_t *data, uint32_t count)
 }
 /*For usb operation.........................................*/
 
-#endif //FATFS_DISK_FLASH
+#endif //CONFIG_FATFS_DISK_FLASH

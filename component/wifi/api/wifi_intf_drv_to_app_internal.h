@@ -66,11 +66,28 @@ void wifi_btcoex_set_pta(enum pta_type type, u8 role, u8 process);
 void wifi_btcoex_set_bt_ant(u8 bt_ant);
 
 /**
+  * @brief Set vendor info to coex
+  * @param[in]  p_vendor_info: vendor info
+  * @param[in]  length: vendor info length
+  * @retval  Null
+  */
+void wifi_btcoex_vendor_info_set(void *p_vendor_info, u8 length);
+
+/**
   * @brief Write BT RFK  data to RFC
   * @param  calibration data
   * @retval  BT RFK result(1:success  0:failed)
   */
 int wifi_btcoex_bt_rfk(struct bt_rfk_param *rfk_param);
+
+/**
+  * @brief Notify extwpan data to COEX
+  * @param[in]  type: type for exewpan send
+  * @param[in]  data; data pointer
+  * @param[in]  data_len; data length
+  * @retval  result(1:success  0:failed)
+  */
+int wifi_extchip_coex_notify(u32 type, u32 data, u32 data_len);
 
 /**
   * @brief Zigbee Call WL RFK
@@ -86,7 +103,7 @@ int wifi_zigbee_coex_zb_rfk(void);
 	WPA3_ONLY_MODE,WPA_WPA2_MIXED_MODE, WPA2_WPA3_MIXED_MODE).
  * @return  0:success  -1:fail.
  */
-int wifi_set_wpa_mode(enum rtw_wpa_mode_type wpa_mode);
+int wifi_set_wpa_mode(u8 wpa_mode);
 
 /**
  * @brief  Dynamically modify the working mode of pmf.
@@ -99,13 +116,12 @@ int wifi_set_wpa_mode(enum rtw_wpa_mode_type wpa_mode);
 int wifi_set_pmf_mode(u8 pmf_mode);
 
 /**
- * @brief  wpa notify wifi driver that 4 way handshake is failed.
- * wifi driver will do disconnect and autoreconnect.
- * can delete this API if autoreconnect can move to up layer.
- * @param[in]  void:
+ * @brief  wpa notify wifi driver status of 4-way/2-way handshake.
+ * wifi driver will do disconnect and autoreconnect when fail & inform coex
+ * @param[in] rtw_wap_4way_status
  * @return  null.
  */
-void wifi_wpa_sta_4way_fail_notify(void);
+void wifi_wpa_4way_status_indicate(struct rtw_wpa_4way_status *rpt_4way);
 
 /**
  * @brief  for wpa to set key to driver
@@ -157,6 +173,14 @@ int wifi_set_group_id(unsigned char value);
  * @return  RTW_ERROR otherwise.
  */
 int wifi_sae_status_indicate(u8 wlan_idx, u16 status, u8 *mac_addr);
+
+/**
+ * @brief  send raw frame
+ * @param[in]  raw_data_desc: the pointer of struct _raw_data_desc_t,
+ * 	which describe related information, include the pointer of raw frame and so on.
+ * @return  RTW_ERROR or RTW SUCCESS
+ */
+int wifi_send_mgnt(struct _raw_data_desc_t *raw_data_desc);
 
 /**
  * @brief  for wpa supplicant indicate ft status.
@@ -214,6 +238,12 @@ int wifi_set_eap_method(unsigned char eap_method);
  * @return  RTW_ERROR or RTW SUCCESS
  */
 int wifi_if_send_eapol(unsigned char wlan_idx, char *buf, __u16 buf_len, __u16 flags);
+
+
+void wifi_btcoex_bt_hci_notify(uint8_t *pdata, uint16_t len, uint8_t dir);
+
+void wifi_event_init(void);
+void wifi_indication(unsigned int event, char *buf, int buf_len, int flags);
 
 #ifdef __cplusplus
 }

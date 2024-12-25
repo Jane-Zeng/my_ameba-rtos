@@ -17,7 +17,7 @@ int rtw_wiphy_init_params(struct wiphy *pwiphy);
 int rtw_wiphy_band_init(struct wiphy *pwiphy, u32 band_type);
 int llhw_wifi_set_user_config(struct wifi_user_conf *pwifi_usrcfg);
 void llhw_wifi_on(void);
-int llhw_wifi_scan(struct _rtw_scan_param_t *scan_param, u32 ssid_len, u32 block);
+int llhw_wifi_scan(struct _rtw_scan_param_t *scan_param, u32 ssid_len, u8 block);
 int llhw_wifi_scan_abort(u8 block);
 int llhw_wifi_connect(struct _rtw_network_info_t *connect_param, unsigned char block);
 int llhw_wifi_disconnect(void);
@@ -90,7 +90,7 @@ int rtw_p2p_get_wdex_idx(struct wireless_dev *wdev);
 #endif
 int llhw_wifi_set_pmf_mode(u8 pmf_mode);
 int llhw_wifi_set_wps_phase(u8 enable);
-int llhw_wifi_set_wpa_mode(rtw_wpa_mode wpa_mode);
+int llhw_wifi_set_wpa_mode(u8 wpa_mode);
 int llhw_wifi_set_owe_param(struct rtw_owe_param_t *owe_param);
 int llhw_wifi_set_gen_ie(unsigned char wlan_idx, char *buf, __u16 buf_len, __u16 flags);
 int llhw_wifi_add_custom_ie(const struct element **elem, u8 num, u16 type);
@@ -102,6 +102,7 @@ int llhw_wifi_get_ant_info(u8 *antdiv_mode, u8 *curr_ant);
 int llhw_wifi_set_country_code(char *cc);
 int llhw_wifi_get_country_code(struct country_code_table_t *table);
 int llhw_wifi_driver_is_mp(void);
+int wifi_btcoex_bt_hci_notify(uint8_t *pdata, uint16_t len, uint8_t dir);
 
 void *rtw_malloc(size_t size, dma_addr_t *paddr);
 void rtw_mfree(size_t size, void *vaddr, dma_addr_t paddr);
@@ -124,7 +125,7 @@ void llhw_event_deinit(void);
 int llhw_ipc_send_msg(u32 id, u32 *param_buf, u32 buf_len);
 
 #else
-void llhw_send_data(u8 *buf, u32 len);
+void llhw_send_data(u8 *buf, u32 len, struct sk_buff *pskb);
 void llhw_recv_data_process(void *intf_priv);
 void llhw_event_task(struct work_struct *data);
 int llhw_xmit_entry(int idx, struct sk_buff *pskb);

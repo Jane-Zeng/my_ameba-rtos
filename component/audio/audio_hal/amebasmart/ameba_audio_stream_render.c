@@ -320,8 +320,13 @@ static void ameba_audio_stream_tx_sport_init(RenderStream **stream, StreamConfig
 					  rstream->stream.sp_initstruct.SP_SelFIFO);
 
 	Init_Params.chn_len = SP_CL_32;
-	Init_Params.chn_cnt = config.channels;
 	Init_Params.sr = rstream->stream.sp_initstruct.SP_SR;
+
+#if AUDIO_I2S_OUT_MULTIIO_EN
+	Init_Params.chn_cnt = 2;
+#else
+	Init_Params.chn_cnt = config.channels;
+#endif
 
 	if (AUDIO_HW_OUT_SPORT_CLK_TYPE == 0) {
 		Init_Params.codec_multiplier_with_rate = 0;
@@ -1075,6 +1080,12 @@ void ameba_audio_stream_tx_close(Stream *stream)
 		GDMA_Cmd(sp_txgdma_initstruct.GDMA_Index, sp_txgdma_initstruct.GDMA_ChNum, DISABLE);
 		GDMA_ChnlFree(sp_txgdma_initstruct.GDMA_Index, sp_txgdma_initstruct.GDMA_ChNum);
 
+		if (rstream->stream.extra_channel) {
+			GDMA_InitTypeDef extra_sp_txgdma_initstruct = rstream->stream.extra_gdma_struct->u.SpTxGdmaInitStruct;
+			GDMA_ClearINT(extra_sp_txgdma_initstruct.GDMA_Index, extra_sp_txgdma_initstruct.GDMA_ChNum);
+			GDMA_Cmd(extra_sp_txgdma_initstruct.GDMA_Index, extra_sp_txgdma_initstruct.GDMA_ChNum, DISABLE);
+			GDMA_ChnlFree(extra_sp_txgdma_initstruct.GDMA_Index, extra_sp_txgdma_initstruct.GDMA_ChNum);
+		}
 		rstream->stream.trigger_tstamp = ameba_audio_get_now_ns();
 
 		AUDIO_SP_DmaCmd(rstream->stream.sport_dev_num, DISABLE);
@@ -1086,13 +1097,23 @@ void ameba_audio_stream_tx_close(Stream *stream)
 		ameba_audio_reset_audio_ip_status((Stream *)rstream);
 
 		rtos_sema_delete(rstream->stream.sem);
+		rtos_sema_delete(rstream->stream.extra_sem);
 		rtos_sema_delete(rstream->stream.sem_gdma_end);
 		rtos_sema_delete(rstream->stream.extra_sem_gdma_end);
 
+		if (rstream->stream.rbuffer) {
 		ameba_audio_stream_buffer_release(rstream->stream.rbuffer);
+		}
+		if (rstream->stream.extra_rbuffer) {
+			ameba_audio_stream_buffer_release(rstream->stream.extra_rbuffer);
+		}
 		if (rstream->stream.gdma_struct) {
 			free(rstream->stream.gdma_struct);
 			rstream->stream.gdma_struct = NULL;
+		}
+		if (rstream->stream.extra_gdma_struct) {
+			free(rstream->stream.extra_gdma_struct);
+			rstream->stream.extra_gdma_struct = NULL;
 		}
 
 		if (rstream->stream.gdma_ch_lli) {

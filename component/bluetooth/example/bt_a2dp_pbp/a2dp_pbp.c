@@ -901,7 +901,24 @@ uint16_t a2dp_pbp_demo_queue_init(a2dp_pbp_demo_queue_t *p_queue, short *queue, 
 	BT_LOGE("[APP] %s queue init failed\r\n", __func__);
 	return RTK_BT_FAIL;
 }
-
+static uint16_t a2dp_pbp_demo_queue_deinit(a2dp_pbp_demo_queue_t *p_queue)
+{
+	if (p_queue != NULL) {
+		p_queue->q_write = -1;
+		p_queue->q_read = -1;
+		p_queue->queue = NULL;
+		p_queue->queue_size = 0;
+		p_queue->queue_max_len = 0;
+		if (p_queue->mtx) {
+			osif_mutex_delete(p_queue->mtx);
+			p_queue->mtx = NULL;
+		}
+		BT_LOGA("[APP] %s queue deinit success\r\n", __func__);
+		return RTK_BT_OK;
+	}
+	BT_LOGE("[APP] %s: p_queue is NULL\r\n", __func__);
+	return RTK_BT_FAIL;
+}
 // static rtk_bt_a2dp_media_codec_aac_t codec_aac = {
 //  .object_type_mask = 0x80,
 //  .sampling_frequency_mask = 0x0180,
@@ -1352,6 +1369,43 @@ static rtk_bt_evt_cb_ret_t rtk_bt_avrcp_app_callback(uint8_t evt_code, void *par
 		memcpy((void *)bd_addr, param, 6);
 		BT_LOGA("[AVRCP] Receive AVRCP connection from %02x:%02x:%02x:%02x:%02x:%02x\r\n",
 				bd_addr[5], bd_addr[4], bd_addr[3], bd_addr[2], bd_addr[1], bd_addr[0]);
+		break;
+	}
+
+	case RTK_BT_AVRCP_EVT_ELEMENT_ATTR_INFO: {
+		uint8_t temp_buff[50];
+		const char *attr[] = {"", "Title:", "Artist:", "Album:", "Track:",
+							  "TotalTrack:", "Genre:", "PlayingTime:"
+							 };
+		rtk_bt_avrcp_element_attr_info_t *p_attr_t = (rtk_bt_avrcp_element_attr_info_t *)param;
+
+		if (p_attr_t->state == 0) {
+			BT_LOGA("[AVRCP] Get element attr information successfully from %02x:%02x:%02x:%02x:%02x:%02x\r\n",
+					p_attr_t->bd_addr[5], p_attr_t->bd_addr[4], p_attr_t->bd_addr[3], p_attr_t->bd_addr[2], p_attr_t->bd_addr[1], p_attr_t->bd_addr[0]);
+			for (uint8_t i = 0; i < p_attr_t->num_of_attr; i ++) {
+				if (p_attr_t->attr[i].length) {
+					memset((void *)temp_buff, 0, 50);
+					snprintf((char *)temp_buff, 50, "%s%s\r\n", attr[p_attr_t->attr[i].attribute_id], p_attr_t->attr[i].p_buf);
+					BT_LOGA("[AVRCP] %s \r\n", temp_buff);
+					osif_mem_free(p_attr_t->attr[i].p_buf);
+				}
+			}
+		} else {
+			BT_LOGA("[AVRCP] Get element attr information fail from %02x:%02x:%02x:%02x:%02x:%02x\r\n",
+					p_attr_t->bd_addr[5], p_attr_t->bd_addr[4], p_attr_t->bd_addr[3], p_attr_t->bd_addr[2], p_attr_t->bd_addr[1], p_attr_t->bd_addr[0]);
+		}
+		if (p_attr_t->num_of_attr) {
+			osif_mem_free(p_attr_t->attr);
+		}
+		break;
+	}
+
+	case RTK_BT_AVRCP_EVT_COVER_ART_DATA_IND: {
+		rtk_bt_avrcp_cover_art_data_ind_t *p_data_t = (rtk_bt_avrcp_cover_art_data_ind_t *)param;
+
+		if (p_data_t->data_end) {
+			BT_LOGA("[AVRCP] Get art cover successfully \r\n");
+		}
 		break;
 	}
 
@@ -2409,10 +2463,10 @@ static rtk_bt_evt_cb_ret_t rtk_bt_le_audio_gap_callback(uint8_t evt_code, void *
 	case RTK_BT_LE_GAP_EVT_SCAN_RES_IND: {
 		rtk_bt_le_scan_res_ind_t *scan_res_ind = (rtk_bt_le_scan_res_ind_t *)param;
 		rtk_bt_le_addr_to_str(&(scan_res_ind->adv_report.addr), le_addr, sizeof(le_addr));
-		BT_LOGA("[APP] Scan info, [Device]: %s, AD evt type: %d, RSSI: %i, len: %d \r\n",
+		BT_LOGA("[APP] Scan info, [Device]: %s, AD evt type: %d, RSSI: %d, len: %d \r\n",
 				le_addr, scan_res_ind->adv_report.evt_type, scan_res_ind->adv_report.rssi,
 				scan_res_ind->adv_report.len);
-		BT_AT_PRINT("+BLEGAP:scan,info,%s,%d,%i,%d\r\n",
+		BT_AT_PRINT("+BLEGAP:scan,info,%s,%d,%d,%d\r\n",
 					le_addr, scan_res_ind->adv_report.evt_type, scan_res_ind->adv_report.rssi,
 					scan_res_ind->adv_report.len);
 		break;
@@ -2423,12 +2477,12 @@ static rtk_bt_evt_cb_ret_t rtk_bt_le_audio_gap_callback(uint8_t evt_code, void *
 		rtk_bt_le_ext_scan_res_ind_t *scan_res_ind = (rtk_bt_le_ext_scan_res_ind_t *)param;
 		rtk_bt_le_addr_to_str(&(scan_res_ind->addr), le_addr, sizeof(le_addr));
 #if 0
-		BT_LOGA("[APP] Ext Scan info, [Device]: %s, AD evt type: 0x%x, RSSI: %i, PHY: 0x%x, TxPower: %d, Len: %d\r\n",
+		BT_LOGA("[APP] Ext Scan info, [Device]: %s, AD evt type: 0x%x, RSSI: %d, PHY: 0x%x, TxPower: %d, Len: %d\r\n",
 				le_addr, scan_res_ind->evt_type, scan_res_ind->rssi,
 				(scan_res_ind->primary_phy << 4) | scan_res_ind->secondary_phy,
 				scan_res_ind->tx_power, scan_res_ind->len);
 #endif
-		BT_AT_PRINT("+BLEGAP:escan,%s,0x%x,%i,0x%x,%d,%d\r\n",
+		BT_AT_PRINT("+BLEGAP:escan,%s,0x%x,%d,0x%x,%d,%d\r\n",
 					le_addr, scan_res_ind->evt_type, scan_res_ind->rssi,
 					(scan_res_ind->primary_phy << 4) | scan_res_ind->secondary_phy,
 					scan_res_ind->tx_power, scan_res_ind->len);
@@ -3005,6 +3059,7 @@ failed:
 				return -1;
 			}
 			app_bt_le_audio_pbp_broadcast_source_deinit();
+			a2dp_pbp_demo_queue_deinit(&pbp_convert_pcm_queue);
 			/* Disable BT */
 			BT_APP_PROCESS(rtk_bt_disable());
 			g_pbp_bsrc_info.status = RTK_BLE_AUDIO_BROADCAST_SOURCE_DISABLE;

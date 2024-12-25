@@ -4,6 +4,10 @@
 #*****************************************************************************#
 OBJS =
 
+CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
+          else if [ -x /bin/bash ]; then echo /bin/bash; \
+          else echo sh; fi ; fi)
+
 CONFIG_DISPLAY ?= 1
 #*****************************************************************************#
 #                        RULES TO GENERATE TARGETS                            #
@@ -94,6 +98,9 @@ menuconfig:
 		echo; \
 		exit 1; \
 	fi
+
+toolchain:
+	make -C ./project_hp toolchain
 
 AP_TARGET_ALL:
 ifneq ($(CONFIG_LINUX_FW_EN),y)

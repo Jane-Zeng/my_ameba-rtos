@@ -16,9 +16,15 @@ ameba-rtos是瑞昱官方推出的物联网开发框架，目前仅支持Linux�
 
 # 相关文档
 
-最新版的文档: https://www.realmcu.com/ ，根据所使用的芯片类型获取相应的应用指南和数据手册。
+最新版的文档: https://github.com/Ameba-AIoT/ameba-iot-docs ，根据所使用的芯片类型点击README中的URL查看相应的应用指南。
 
 **注意:** 不同系列的芯片都有其相对应的文档，请根据特定的芯片名称查找文档。
+
+# 使用Gitee加速
+
+对于可以访问[Gitee](https://gitee.com) 的用户，当发现从GitHub下载仓库过慢时，我们建议将仓库导入到Gitee中来提升下载速度。
+
+具体导入步骤请参考[如何导入 GitHub 等第三方 Git 仓库 ](https://gitee.com/help/articles/4261)。
 
 # 快速参考
 
@@ -30,6 +36,8 @@ ameba-rtos是瑞昱官方推出的物联网开发框架，目前仅支持Linux�
 * 目前仅支持Linux系统，要求Ubuntu 16.04 64位或更高版本。
 * 未来将支持Windows系统，使用VSCode插件进行编译。
 * 要求Python版本3.7或更高版本。执行命令`python --version`检查当前系统中的Python版本，如果出现"Command `python` not found"的错误提示，请参考应用指南中的**Preparing GCC Environment**章节安装Python3。如果仍出现错误，请执行命令`sudo ln -s /usr/bin/python3 /usr/bin/python`创建`/usr/bin/python3`映射到`/usr/bin/python`的符号链接。
+
+**注意:** 首次编译工程时，工具链默认从GitHub下载并安装。如果发现下载速度过慢或者下载失败，请执行命令`make toolchan URL=github`或者`make toolchain URL=aliyun`先下载好工具链。为提升下载速度，我们建议执行`make toolchain URL=aliyun`从阿里云服务器下载。
 
 ## 寻找项目
 

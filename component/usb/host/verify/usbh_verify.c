@@ -28,6 +28,10 @@ typedef int(* usbh_xfer_func)(usb_host_t *host, u8 *buf, u16 len, u8 pipe_id);
 
 #define USBH_DUMP_EP_MSG    0
 
+/* No loopback, cant set both IN & OUT only. INTR_ISOC_IN_ONLY need USBD cooperate */
+#define INTR_ISOC_IN_ONLY   0
+#define INTR_ISOC_OUT_ONLY  0
+
 /* Private function prototypes -----------------------------------------------*/
 
 static int usbh_verify_attach(usb_host_t *host);
@@ -35,9 +39,12 @@ static int usbh_verify_detach(usb_host_t *host);
 static int usbh_verify_process(usb_host_t *host);
 static int usbh_verify_setup(usb_host_t *host);
 //static int usbh_verify_sof(usb_host_t *host);
-//static int usbh_verify_nak(usb_host_t *host, u8 pipe_id);
+static int usbh_verify_nak(usb_host_t *host, u8 pipe_id);
 static int usbh_verify_usb_status_check(void);
 
+
+static int usbh_verify_all_out_finish(void);
+static inline void usbh_verify_success(usbh_verify_xfer_t *xfer);
 /* Private variables ---------------------------------------------------------*/
 static const char *TAG = "VFY";
 static const char *TEXT_CTRL = "CTRL";
@@ -50,8 +57,8 @@ static const char *TEXT_ISOC = "ISOC";
 	1:running
 	2:exit the task, switch to idle
 */
-static __IO u8 usbh_verifty_status_task = 0 ;
-static __IO u8 usbh_verifty_test_task = 0 ;
+static __IO u8 usbh_verifty_status_task = 0;
+static __IO u8 usbh_verifty_test_task = 0;
 /* USB Standard Device Descriptor */
 static usbh_class_driver_t usbh_verify_driver = {
 	.class_code = VERIFY_CLASS_CODE,
@@ -60,7 +67,7 @@ static usbh_class_driver_t usbh_verify_driver = {
 	.setup = usbh_verify_setup,
 	.process = usbh_verify_process,
 	.sof = NULL,
-	.nak = NULL,
+	.nak = usbh_verify_nak,
 };
 
 static usbh_verify_host_t usbh_verify_host;
@@ -137,7 +144,7 @@ static void usbh_verify_dump_ep_info(usbh_verify_xfer_t *xfer)
 {
 #if USBH_DUMP_EP_MSG
 	char *xfer_type = usbh_verify_get_xfer_type_text(xfer);
-	char *direction = (USB_EP_IS_IN(xfer->ep_addr)) ? ("IN") : ("OUT") ;
+	char *direction = (USB_EP_IS_IN(xfer->ep_addr)) ? "IN" : "OUT";
 	RTK_LOGS(TAG, "[VFY] Dump: %s-%s mask=0x%08x state=%d EP%02x/pipe=%d MPS=%d transize=%d type=%d interval=%d\n",
 			 xfer_type, direction, xfer->test_mask,
 			 xfer->state, xfer->ep_addr,
@@ -148,11 +155,12 @@ static void usbh_verify_dump_ep_info(usbh_verify_xfer_t *xfer)
 #endif
 }
 
+#if 0
 static void usbh_verify_dump_buf(u8 *buf, u32 len)
 {
 	u32 i;
 	if (len > DUMP_DATA_MAX_LEN) {
-		len = DUMP_DATA_MAX_LEN ;
+		len = DUMP_DATA_MAX_LEN;
 	}
 	for (i = 0; i < len;) {
 		if (i + 10 <= len) {
@@ -169,6 +177,7 @@ static void usbh_verify_dump_buf(u8 *buf, u32 len)
 		}
 	}
 }
+#endif
 
 static int usbh_verify_add_ep(usbh_ep_desc_t *ep_desc)
 {
@@ -186,7 +195,7 @@ static int usbh_verify_add_ep(usbh_ep_desc_t *ep_desc)
 	mps = ep_desc->wMaxPacketSize;
 	ep_type = ep_desc->bmAttributes & USB_EP_XFER_TYPE_MASK;
 
-	for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+	for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 		ep = verify->ep_array + ep_index;
 		if (ep && (epaddr == ep->ep_addr)) {
 			break;
@@ -227,6 +236,9 @@ static void usbh_verify_get_endpoints(usbh_if_desc_t *intf)
 static int usbh_verify_all_out_finish(void)
 {
 	int ret = 1;
+#if INTR_ISOC_IN_ONLY
+	ret = 0;
+#else
 	u8 ep_index;
 	usbh_verify_xfer_t *ep;
 	usbh_verify_host_t *verify = &usbh_verify_host;
@@ -234,23 +246,25 @@ static int usbh_verify_all_out_finish(void)
 		if ((verify->host->tick - verify->finish_tick) < USBH_FORCE_IN_EXIT_SOF_COUNT_MAX) {
 			ret = 0;
 		} else {
-			RTK_LOGS(TAG, "[VFY] Force all USB TX finish tick %d\n", verify->host->tick);
+			RTK_LOGS(TAG, "[VFY] Force all USB TX finish tick(%d)\n", verify->host->tick);
 		}
 	} else {
-		for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+		for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 			ep = verify->ep_array + ep_index;
-			if (PIPE_IS_VALID(ep->pipe_id) && USB_EP_IS_OUT(ep->ep_addr) && (ep->xfer_cnt < verify->test_count_limit)) {
-				ret = 0 ;
+			if (PIPE_IS_VALID(ep->pipe_id) && USB_EP_IS_OUT(ep->ep_addr) &&
+				(ep->test_mask & verify->ep_test) && (ep->xfer_cnt < verify->test_count_limit)) {
+				ret = 0;
+				break;
 			}
 		}
 		//if ret =1 means all usb out finish,update the finish tick value
 		if ((1 == ret) && (0 == verify->finish_tick)) {
-			RTK_LOGS(TAG, "[VFY] All USB TX finish tick %d\n", verify->host->tick);
+			RTK_LOGS(TAG, "[VFY] All USB OUT transmit finish tick(%d)\n\n", verify->host->tick);
 			verify->finish_tick = verify->host->tick;
-			ret = 0 ;
+			ret = 0;
 		}
 	}
-
+#endif
 	return ret;
 }
 
@@ -262,7 +276,7 @@ static inline void usbh_verify_success(usbh_verify_xfer_t *xfer)
 
 static void usbh_verify_check_indata_valid(usbh_verify_xfer_t *rx_xfer)
 {
-	if (rx_xfer) {
+	if ((rx_xfer) && (rx_xfer->xfer_len > 0)) {
 		if (rx_xfer->expect_data != rx_xfer->xfer_buf[0]) {
 			rx_xfer->error_cnt ++;
 			RTK_LOGS(TAG, "[VFY] %s err %d/want %d get %d\n", usbh_verify_get_xfer_type_text(rx_xfer),
@@ -272,202 +286,450 @@ static void usbh_verify_check_indata_valid(usbh_verify_xfer_t *rx_xfer)
 	}
 }
 
-static void usbh_verify_tx_transmit(usbh_verify_xfer_t *in_xfer, usbh_xfer_func xfer_func)
+static void usbh_verify_check_for_next_loop(usbh_verify_xfer_t *xfer)
 {
 	usbh_verify_host_t *verify = &usbh_verify_host;
-	usb_host_t *host = verify->host;
+	char *xfer_type = usbh_verify_get_xfer_type_text(xfer);
+	char *direction = (USB_EP_IS_IN(xfer->ep_addr)) ? "IN" : "OUT";
 
-	xfer_func(host, in_xfer->xfer_buf, in_xfer->trans_size, in_xfer->pipe_id);//in token
-	in_xfer->state = VERIFY_STATE_BUSY;
-	in_xfer->idle_count = 0 ;
+	if (usbh_verify_all_out_finish() || (xfer->xfer_cnt >= verify->test_count_limit)) {
+		xfer->state = VERIFY_STATE_IDLE;
+		verify->ep_test &= ~(xfer->test_mask);
+		RTK_LOGS(TAG, "[VFY] %s %s test finish %d/%d/%x\n", xfer_type, direction, xfer->xfer_cnt, verify->test_count_limit, verify->ep_test);
+		if (xfer->ep_type == USB_CH_EP_TYPE_BULK) {
+			verify->bulk_trx_state = USBH_VERIFY_TRX_IDLE;
+		} else if (xfer->ep_type == USB_CH_EP_TYPE_INTR) {
+			verify->intr_trx_state = USBH_VERIFY_TRX_IDLE;
+		} else {
+			verify->isoc_trx_state = USBH_VERIFY_TRX_IDLE;
+		}
+	} else {
+		xfer->xfer_len = xfer->trans_size;
+		xfer->xfer_buf = xfer->xfer_bk_buf;
+		xfer->state = VERIFY_STATE_XFER;
+		/* Loopback: switch to peer-ep xfer. TODO: no peer IDLE */
+		if (USB_EP_IS_OUT(xfer->ep_addr)) {
+			usb_os_memset((void *)xfer->xfer_buf, (u8)(xfer->xfer_cnt & 0xFF), xfer->trans_size);
+			if (xfer->ep_type == USB_CH_EP_TYPE_BULK) {
+				verify->bulk_trx_state = USBH_VERIFY_RX;/* Switch to RX */
+			} else if (xfer->ep_type == USB_CH_EP_TYPE_INTR) {
+#if INTR_ISOC_OUT_ONLY
+				verify->intr_trx_state = USBH_VERIFY_TRX_IDLE;
+#else //Loopback
+				verify->intr_trx_state = USBH_VERIFY_RX;
+#endif
+			} else {
+#if INTR_ISOC_OUT_ONLY
+				verify->isoc_trx_state = USBH_VERIFY_TRX_IDLE;
+#else //Loopback
+				verify->isoc_trx_state = USBH_VERIFY_RX;
+#endif
+			}
+		} else {
+			if (xfer->ep_type == USB_CH_EP_TYPE_BULK) {
+				verify->bulk_trx_state = USBH_VERIFY_TX;/* Switch to next TX */
+			} else if (xfer->ep_type == USB_CH_EP_TYPE_INTR) {
+#if INTR_ISOC_IN_ONLY
+				verify->intr_trx_state = USBH_VERIFY_TRX_IDLE;
+#else //Loopback
+				verify->intr_trx_state = USBH_VERIFY_TX;
+#endif
+			} else {
+#if INTR_ISOC_IN_ONLY
+				verify->isoc_trx_state = USBH_VERIFY_TRX_IDLE;
+#else //Loopback
+				verify->isoc_trx_state = USBH_VERIFY_TX;
+#endif
+			}
+		}
+	}
 }
 
-int usbh_verify_xfer_process(usbh_verify_xfer_t *xfer)
+static void usbh_verify_bulk_process_rx(usbh_verify_xfer_t *xfer)
 {
-	usbh_verify_xfer_t *in_xfer = NULL;
-	usbh_verify_xfer_t *out_xfer = NULL ;
-	usbh_xfer_func xfer_func = NULL;
-	usbh_urb_state_t xfer_urb_state = USBH_URB_IDLE;
 	usbh_verify_host_t *verify = &usbh_verify_host;
 	usb_host_t *host = verify->host;
-	int is_timeout = 0;
+	usbh_urb_state_t xfer_urb_state = USBH_URB_IDLE;
+	usbh_xfer_func xfer_func = NULL;
+	u32 rx_len;
 	int status;
-	int loop_ctl = 1;
-	int is_ptx;
-	u32 len;
-	u32 ticks;
+	static int retry_time;
 
-	char *xfer_type = usbh_verify_get_xfer_type_text(xfer);
 	xfer_func = usbh_verify_get_xfer_func(xfer);
-	if (NULL == xfer_func) {
-		return HAL_OK;
+
+	if ((xfer->ep_type == USB_CH_EP_TYPE_BULK) && (verify->bulk_trx_state == USBH_VERIFY_TX)) {
+		return;
+	}
+	if ((xfer->ep_type == USB_CH_EP_TYPE_BULK) && (verify->bulk_trx_state == USBH_VERIFY_TRX_IDLE)) {
+		verify->bulk_trx_state = USBH_VERIFY_RX;
 	}
 
-	if (USB_EP_IS_IN(xfer->ep_addr)) {//in
-		in_xfer = xfer;
-		if (usbh_verify_all_out_finish() || (in_xfer->xfer_cnt >= verify->test_count_limit)) {
-			RTK_LOGS(TAG, "[VFY] %s test result: force IN Finish %d/%d flag 0x%08x\n", xfer_type, in_xfer->xfer_cnt, verify->test_count_limit, verify->ep_test);
-			in_xfer->state = VERIFY_STATE_IDLE;
-			verify->ep_test &= ~(in_xfer->test_mask);
-			return HAL_OK;
+	switch (xfer->state) {
+	case VERIFY_STATE_XFER:
+		status = xfer_func(host, xfer->xfer_buf, xfer->xfer_len, xfer->pipe_id);
+		xfer->tick = host->tick;
+		if (status == HAL_OK) {
+			xfer->state = VERIFY_STATE_BUSY;
 		}
-		switch (in_xfer->state) {
-		case VERIFY_STATE_XFER:
-			usbh_verify_tx_transmit(in_xfer, xfer_func);
-			break;
+		break;
 
-		case VERIFY_STATE_BUSY:
-			xfer_urb_state = usbh_get_urb_state(host, in_xfer->pipe_id);
-			//RTK_LOGS(TAG, "[VFY] %s-in TX busy,state %d\n",xfer_type,xfer_urb_state);
-			if (xfer_urb_state == USBH_URB_DONE) {
-				in_xfer->idle_count = 0;
-				len = usbh_get_last_transfer_size(host, in_xfer->pipe_id);
-				if (len == 0) {//ZLP
-					//RTK_LOGS(TAG, "[VFY] %s in ZLP\n",xfer_type);
-					usbh_verify_tx_transmit(in_xfer, xfer_func);
-					break;
-				}
-				//RTK_LOGS(TAG, "[VFY] %s in done %02x %d data=%d len=%d-%d\n", xfer_type, in_xfer->ep_addr,
-				//		 in_xfer->xfer_cnt, in_xfer->xfer_buf[0],
-				//		 len, in_xfer->xfer_len);
-				//usbh_verify_dump_buf(in_xfer->xfer_buf, len);
-				if (((in_xfer->xfer_len - len) > 0U) && (len >= in_xfer->ep_mps)) {
-					in_xfer->xfer_len -= len ;
-					in_xfer->xfer_buf += len;
-					in_xfer->state = VERIFY_STATE_XFER;
+	case VERIFY_STATE_BUSY:
+		xfer_urb_state = usbh_get_urb_state(host, xfer->pipe_id);
+		if (xfer_urb_state == USBH_URB_DONE) {
+			retry_time = 0;
+			rx_len = usbh_get_last_transfer_size(host, xfer->pipe_id);
+
+			/* Handle the ZLP packet */
+			if ((xfer->xfer_len > rx_len) && (xfer->xfer_len > xfer->ep_mps)) {
+				xfer->xfer_len -= rx_len;
+				xfer->xfer_buf += rx_len;
+				xfer->state = VERIFY_STATE_XFER;
+			} else if ((xfer->xfer_len > 0) && (xfer->xfer_len % xfer->ep_mps) == 0) {
+				xfer->xfer_len = 0;/* Last ZLP for multi-MPS */
+				xfer->xfer_buf = NULL;
+				xfer->state = VERIFY_STATE_XFER;
+			} else {
+				usbh_verify_success(xfer);
+				usbh_verify_check_indata_valid(xfer);
+				usbh_verify_check_for_next_loop(xfer);
+			}
+		} else if ((xfer_urb_state == USBH_URB_BUSY) || (xfer_urb_state == USBH_URB_IDLE)) {
+			if (usbh_get_elapsed_ticks(host, xfer->tick) > 50) {
+				retry_time++;
+				if (retry_time < 5) {
+					xfer->state = VERIFY_STATE_XFER;
 				} else {
-					usbh_verify_success(in_xfer);
-					usbh_verify_check_indata_valid(in_xfer);
-					//RTK_LOGS(TAG, "[VFY] In xferlen %d/%d,mps %d cnt %d/%d\n", in_xfer->xfer_len, len, in_xfer->ep_mps, in_xfer->xfer_cnt, verify->test_count_limit);
-					if (usbh_verify_all_out_finish() || (in_xfer->xfer_cnt >= verify->test_count_limit)) {
-						in_xfer->state = VERIFY_STATE_IDLE;
-						verify->ep_test &= ~(in_xfer->test_mask);
-						RTK_LOGS(TAG, "[VFY] %s-n test finish %d/%d flag %d\n", xfer_type, in_xfer->xfer_cnt, verify->test_count_limit, verify->ep_test);
-					} else {
-						in_xfer->xfer_len = in_xfer->trans_size;
-						in_xfer->xfer_buf = in_xfer->xfer_bk_buf;
-
-						//start next intoken
-						usbh_verify_tx_transmit(in_xfer, xfer_func);
-					}
+					retry_time = 0;
+					xfer->xfer_cnt ++;
+					usbh_verify_check_for_next_loop(xfer);
 				}
-			} else if ((xfer_urb_state == USBH_URB_ERROR) || (xfer_urb_state == USBH_URB_STALL)) {
-				RTK_LOGS(TAG, "[VFY] %s in err force exit\n", xfer_type);
-				in_xfer->state = VERIFY_STATE_IDLE;
-				loop_ctl = 0;
-			} else if (xfer_urb_state == USBH_URB_BUSY)  {//busy
-				///check finish issue
-				//RTK_LOGS(TAG, "[VFY]%s in busy state, continue wait, idle=%d\n", xfer_type, in_xfer->idle_count);
-				in_xfer->idle_count ++;
-				//check the time is better then the loop count
-				if ((in_xfer->ep_type == USB_CH_EP_TYPE_ISOC) && (in_xfer->idle_count >= 1000)) {
-					//RTK_LOGS(TAG, "[VFY] %s busy too long, reset\n", xfer_type);
-					in_xfer->state = VERIFY_STATE_XFER;
-					in_xfer->idle_count = 0 ;
-				}
-			} else { //idle
-				/*
-								We assume that,while call usbh_xx_receive_data,
-								The intoken will be sent out,
-								So just wait for usb status change
-
-								//while run usbh_receive_data , but the interrupt not happen
-								in_xfer->idle_count ++ ;
-								if (in_xfer->idle_count > 2000) {
-									//RTK_LOGS(TAG, "[VFY] %s in maybe some wrong, try again\n", xfer_type);
-									in_xfer->idle_count = 0  ;
-									in_xfer->state = VERIFY_STATE_XFER;
-								}
-				*/
 			}
-			break;
-		default:
-			//RTK_LOGS(TAG, "[VFY] %s in default, switch %d to idle\n", xfer_type, in_xfer->state);
-			in_xfer->state = VERIFY_STATE_IDLE;
-			break;
+		} else if ((xfer_urb_state == USBH_URB_ERROR) || (xfer_urb_state == USBH_URB_STALL)) {
+			xfer->state = VERIFY_STATE_IDLE;
 		}
-	} else { //usb out
-		is_ptx = ((xfer->ep_type == USB_CH_EP_TYPE_INTR) || (xfer->ep_type == USB_CH_EP_TYPE_ISOC));
-		out_xfer = xfer;
-		switch (out_xfer->state) {
-		case VERIFY_STATE_XFER:
-			if (is_ptx) {
-				ticks = host->tick;
-				if ((ticks - out_xfer->tick) >= out_xfer->ep_interval) {
-					out_xfer->tick = ticks;
-					is_timeout = 1;
-				}
-			}
+		break;
 
-			if ((!is_ptx) || is_timeout) {
-				out_xfer->idle_count = 0 ;
-				//RTK_LOGS(TAG, "[VFY] %s out will run cmd len=%d-%d/mps=%d\n", xfer_type, out_xfer->xfer_len, out_xfer->xfer_buf[0], out_xfer->ep_mps);
-				if (out_xfer->xfer_len > out_xfer->ep_mps) {
-					status = xfer_func(host, out_xfer->xfer_buf, out_xfer->ep_mps, out_xfer->pipe_id);
+	default:
+		break;
+	}
+}
+
+static void usbh_verify_bulk_process_tx(usbh_verify_xfer_t *xfer)
+{
+	usbh_verify_host_t *verify = &usbh_verify_host;
+	usb_host_t *host = verify->host;
+	usbh_urb_state_t xfer_urb_state = USBH_URB_IDLE;
+	usbh_xfer_func xfer_func = NULL;
+	int status;
+	static int retry_time;
+
+	xfer_func = usbh_verify_get_xfer_func(xfer);
+
+	if ((xfer->ep_type == USB_CH_EP_TYPE_BULK) && (verify->bulk_trx_state == USBH_VERIFY_RX)) {
+		return;
+	}
+	if ((xfer->ep_type == USB_CH_EP_TYPE_BULK) && (verify->bulk_trx_state == USBH_VERIFY_TRX_IDLE)) {
+		verify->bulk_trx_state = USBH_VERIFY_TX;
+	}
+
+	switch (xfer->state) {
+	case VERIFY_STATE_XFER:
+		status = xfer_func(host, xfer->xfer_buf, xfer->xfer_len, xfer->pipe_id);
+		xfer->tick = host->tick;
+		if (status == HAL_OK) {
+			xfer->state = VERIFY_STATE_BUSY;
+		}
+		break;
+
+	case VERIFY_STATE_BUSY:
+		xfer_urb_state = usbh_get_urb_state(host, xfer->pipe_id);
+		if (xfer_urb_state == USBH_URB_DONE) {
+			retry_time = 0;
+			if ((xfer->xfer_len > 0) && ((xfer->trans_size % xfer->ep_mps) == 0)) {
+				xfer->xfer_len = 0;/* Last ZLP for multi-MPS */
+				xfer->xfer_buf = NULL;
+				xfer->state = VERIFY_STATE_XFER;
+			} else {/* Short or ZLP done */
+				usbh_verify_success(xfer);
+				usbh_verify_check_for_next_loop(xfer);
+			}
+		} else if ((xfer_urb_state == USBH_URB_ERROR) || (xfer_urb_state == USBH_URB_STALL)) {
+			xfer->state = VERIFY_STATE_IDLE;
+		} else if ((xfer_urb_state == USBH_URB_BUSY) || (xfer_urb_state == USBH_URB_IDLE)) {
+			if (usbh_get_elapsed_ticks(host, xfer->tick) >= 50) {
+				retry_time++;
+				if (retry_time < 5) {
+					xfer->state = VERIFY_STATE_XFER;
 				} else {
-					status = xfer_func(host, out_xfer->xfer_buf, out_xfer->xfer_len, out_xfer->pipe_id);
-				}
-
-				if (status == HAL_OK) {
-					out_xfer->state = VERIFY_STATE_BUSY;
+					retry_time = 0;
+					xfer->xfer_cnt ++;
+					usbh_verify_check_for_next_loop(xfer);
 				}
 			}
-			break;
-
-		case VERIFY_STATE_BUSY:
-			xfer_urb_state = usbh_get_urb_state(host, out_xfer->pipe_id);
-			if (xfer_urb_state == USBH_URB_DONE) {
-				out_xfer->idle_count = 0 ;
-				//RTK_LOGS(TAG, "[VFY] %s out xferlen=%d,mps=%d %d[%d] done\n", xfer_type, out_xfer->xfer_len, out_xfer->ep_mps, out_xfer->xfer_cnt, verify->test_count_limit);
-				if (out_xfer->xfer_len > out_xfer->ep_mps) {//continue
-					out_xfer->xfer_len -= out_xfer->ep_mps;
-					out_xfer->xfer_buf += out_xfer->ep_mps;
-					out_xfer->state = VERIFY_STATE_XFER;
-				} else if (out_xfer->xfer_len == out_xfer->ep_mps) { //ZLP
-					out_xfer->xfer_len = 0U;
-					out_xfer->xfer_buf = NULL;
-					out_xfer->state = VERIFY_STATE_XFER;
-				} else {//finish
-					usbh_verify_success(out_xfer);
-					if (out_xfer->xfer_cnt >= verify->test_count_limit) {
-						RTK_LOGS(TAG, "[VFY] %s-out test finish %d/%d\n", xfer_type, out_xfer->xfer_cnt, verify->test_count_limit);
-						verify->ep_test &= ~(out_xfer->test_mask);
-						out_xfer->state = VERIFY_STATE_IDLE;
-						loop_ctl = 0;
-					} else {
-						out_xfer->xfer_len = out_xfer->trans_size;
-						out_xfer->xfer_buf = out_xfer->xfer_bk_buf;
-						out_xfer->state = VERIFY_STATE_XFER;
-						usb_os_memset((void *)out_xfer->xfer_buf, (u8)(out_xfer->xfer_cnt & 0xFF), out_xfer->xfer_len);
-					}
-				}
-			} else if (xfer_urb_state == USBH_URB_ERROR) {
-				RTK_LOGS(TAG, "[VFY] %s out err\n", xfer_type);
-				out_xfer->state = VERIFY_STATE_XFER;
-			} else {//busy&idle
-				out_xfer->idle_count ++;
-				if ((out_xfer->ep_type == USB_CH_EP_TYPE_ISOC) && (out_xfer->idle_count >= 1000)) {
-					//RTK_LOGS(TAG, "[VFY] %s out busy too long, tx again\n", xfer_type);
-					out_xfer->idle_count = 0 ;
-
-					out_xfer->xfer_len = out_xfer->trans_size;
-					out_xfer->xfer_buf = out_xfer->xfer_bk_buf;
-					out_xfer->state = VERIFY_STATE_XFER;
-					usb_os_memset((void *)out_xfer->xfer_buf, (u8)out_xfer->xfer_cnt, out_xfer->xfer_len);
-				}
-			}
-			break;
-		default:
-			//RTK_LOGS(TAG, "[VFY] %s out default, switch %d to idle\n", xfer_type, out_xfer->state);
-			out_xfer->state = VERIFY_STATE_IDLE;
-			break;
 		}
+		break;
+
+	default:
+		xfer->state = VERIFY_STATE_IDLE;
+		break;
 	}
-	if (loop_ctl) {
-		verify->next_transfor = 1;
+}
+
+static void usbh_verify_intr_process_rx(usbh_verify_xfer_t *xfer)
+{
+	usbh_verify_host_t *verify = &usbh_verify_host;
+	usb_host_t *host = verify->host;
+	usbh_urb_state_t xfer_urb_state = USBH_URB_IDLE;
+	usbh_xfer_func xfer_func = NULL;
+	int status;
+	static int retry_time;
+
+	xfer_func = usbh_verify_get_xfer_func(xfer);
+
+	if ((xfer->ep_type == USB_CH_EP_TYPE_INTR) && (verify->intr_trx_state == USBH_VERIFY_TX)) {
+		return;
+	}
+	if ((xfer->ep_type == USB_CH_EP_TYPE_INTR) && (verify->intr_trx_state == USBH_VERIFY_TRX_IDLE)) {
+		verify->intr_trx_state = USBH_VERIFY_RX;
 	}
 
-	return HAL_OK;
+	switch (xfer->state) {
+	case VERIFY_STATE_XFER:
+		status = xfer_func(host, xfer->xfer_buf, xfer->xfer_len, xfer->pipe_id);
+		xfer->tick = host->tick;
+		if (status == HAL_OK) {
+			xfer->state = VERIFY_STATE_BUSY;
+		}
+		break;
+
+	case VERIFY_STATE_BUSY:
+		xfer_urb_state = usbh_get_urb_state(host, xfer->pipe_id);
+
+		if (xfer_urb_state == USBH_URB_DONE) {
+			retry_time = 0;
+			/* Handle the ZLP packet */
+			if ((xfer->xfer_len > 0) && ((xfer->xfer_len % xfer->ep_mps) == 0)) {
+				xfer->xfer_len = 0;/* Last ZLP for multi-MPS */
+				xfer->state = VERIFY_STATE_XFER;
+			} else {
+				usbh_verify_success(xfer);
+				usbh_verify_check_indata_valid(xfer);
+				usbh_verify_check_for_next_loop(xfer);
+			}
+		} else if ((xfer_urb_state == USBH_URB_BUSY) || (xfer_urb_state == USBH_URB_IDLE)) {
+			if (usbh_get_elapsed_ticks(host, xfer->tick) > xfer->ep_interval) {/*Next interval req if NAK*/
+				retry_time++;
+				if (retry_time < 10) {
+					xfer->state = VERIFY_STATE_XFER;
+				} else {
+					retry_time = 0;
+					xfer->xfer_cnt ++;
+					usbh_verify_check_for_next_loop(xfer);
+				}
+			}
+		} else if ((xfer_urb_state == USBH_URB_ERROR) || (xfer_urb_state == USBH_URB_STALL)) {
+			/*retry less than twice if RX data err*/
+			xfer->state = VERIFY_STATE_IDLE;
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+
+
+static void usbh_verify_intr_process_tx(usbh_verify_xfer_t *xfer)
+{
+	usbh_verify_host_t *verify = &usbh_verify_host;
+	usb_host_t *host = verify->host;
+	usbh_urb_state_t xfer_urb_state = USBH_URB_IDLE;
+	usbh_xfer_func xfer_func = NULL;
+	int status;
+	static int retry_time;
+
+	xfer_func = usbh_verify_get_xfer_func(xfer);
+
+	if ((xfer->ep_type == USB_CH_EP_TYPE_INTR) && (verify->intr_trx_state == USBH_VERIFY_RX)) {
+		return;
+	}
+	if ((xfer->ep_type == USB_CH_EP_TYPE_INTR) && (verify->intr_trx_state == USBH_VERIFY_TRX_IDLE)) {
+		verify->intr_trx_state = USBH_VERIFY_TX;
+	}
+
+	switch (xfer->state) {
+	case VERIFY_STATE_XFER:
+		status = xfer_func(host, xfer->xfer_buf, xfer->xfer_len, xfer->pipe_id);
+		xfer->tick = host->tick;
+		if (status == HAL_OK) {
+			xfer->state = VERIFY_STATE_BUSY;
+		}
+		break;
+
+	case VERIFY_STATE_BUSY:
+		xfer_urb_state = usbh_get_urb_state(host, xfer->pipe_id);
+		if (xfer_urb_state == USBH_URB_DONE) {
+			retry_time = 0;
+			if ((xfer->xfer_len > 0) && ((xfer->trans_size % xfer->ep_mps) == 0)) {
+				xfer->xfer_len = 0;/* Last ZLP for multi-MPS */
+				xfer->xfer_buf = NULL;
+				xfer->state = VERIFY_STATE_XFER;
+			} else {
+				usbh_verify_success(xfer);
+				usbh_verify_check_for_next_loop(xfer);
+			}
+		} else if ((xfer_urb_state == USBH_URB_ERROR) || (xfer_urb_state == USBH_URB_STALL)) {
+			xfer->state = VERIFY_STATE_IDLE;
+		} else if ((xfer_urb_state == USBH_URB_BUSY) || (xfer_urb_state == USBH_URB_IDLE)) {
+			/*If the endpoint NAKs a transaction during a microframe, the host controller
+			must not issue further transactions for that endpoint until the next period.*/
+			if (usbh_get_elapsed_ticks(host, xfer->tick) > xfer->ep_interval) {
+				retry_time ++;
+				if (retry_time < 10) {
+					xfer->state = VERIFY_STATE_XFER;
+				} else {
+					retry_time = 0;
+					xfer->xfer_cnt ++;
+					usbh_verify_check_for_next_loop(xfer);
+				}
+			}
+		}
+		break;
+
+	default:
+		xfer->state = VERIFY_STATE_IDLE;
+		break;
+	}
+}
+
+static void usbh_verify_isoc_process_rx(usbh_verify_xfer_t *xfer)
+{
+	usbh_verify_host_t *verify = &usbh_verify_host;
+	usb_host_t *host = verify->host;
+	usbh_urb_state_t xfer_urb_state = USBH_URB_IDLE;
+	usbh_xfer_func xfer_func = NULL;
+	u32 rx_len;
+	int status;
+	static int retry_time;
+
+	xfer_func = usbh_verify_get_xfer_func(xfer);
+
+	if (verify->isoc_trx_state == USBH_VERIFY_TX) {
+		return;
+	}
+	if (verify->isoc_trx_state == USBH_VERIFY_TRX_IDLE) {
+		verify->isoc_trx_state = USBH_VERIFY_RX;
+	}
+
+	switch (xfer->state) {
+	case VERIFY_STATE_XFER:
+		status = xfer_func(host, xfer->xfer_buf, xfer->xfer_len, xfer->pipe_id);
+		xfer->tick = host->tick;
+		if (status == HAL_OK) {
+			xfer->state = VERIFY_STATE_BUSY;
+		}
+		break;
+
+	case VERIFY_STATE_BUSY:
+		xfer_urb_state = usbh_get_urb_state(host, xfer->pipe_id);
+		if (xfer_urb_state == USBH_URB_DONE) {
+			rx_len = usbh_get_last_transfer_size(host, xfer->pipe_id);
+			if (rx_len == 0) {/* ISOC IN ZLP*/
+				retry_time++;
+				if (retry_time < 100) {
+					xfer->state = VERIFY_STATE_XFER;
+				} else {
+					retry_time = 0;
+					usbh_verify_check_for_next_loop(xfer);
+				}
+				break;
+			} else {
+				retry_time = 0;
+				usbh_verify_success(xfer);
+				usbh_verify_check_indata_valid(xfer);
+				usbh_verify_check_for_next_loop(xfer);
+			}
+		} else if ((xfer_urb_state == USBH_URB_ERROR) || (xfer_urb_state == USBH_URB_STALL)) {
+			xfer->state = VERIFY_STATE_IDLE;
+		} else if ((xfer_urb_state == USBH_URB_BUSY) || (xfer_urb_state == USBH_URB_IDLE)) {
+			/* ISOC not support retry */
+			if (usbh_get_elapsed_ticks(host, xfer->tick) > 100) {
+				retry_time = 0;
+				xfer->xfer_cnt ++;
+				usbh_verify_check_for_next_loop(xfer);
+			}
+		}
+		break;
+	default:
+		xfer->state = VERIFY_STATE_IDLE;
+		break;
+	}
+}
+
+
+static void usbh_verify_isoc_process_tx(usbh_verify_xfer_t *xfer)
+{
+	usbh_verify_host_t *verify = &usbh_verify_host;
+	usb_host_t *host = verify->host;
+	usbh_urb_state_t xfer_urb_state = USBH_URB_IDLE;
+	usbh_xfer_func xfer_func = NULL;
+	u32 tx_len;
+	int status;
+
+	xfer_func = usbh_verify_get_xfer_func(xfer);
+
+	if (verify->isoc_trx_state == USBH_VERIFY_RX) {
+		return;
+	}
+	if (verify->isoc_trx_state == USBH_VERIFY_TRX_IDLE) {
+		verify->isoc_trx_state = USBH_VERIFY_TX;
+	}
+
+	switch (xfer->state) {
+	case VERIFY_STATE_XFER:
+		if (usbh_get_device_speed(host) == USB_SPEED_HIGH) {
+			tx_len = xfer->xfer_len;
+		} else {
+			tx_len = (xfer->xfer_len >= xfer->ep_mps) ? xfer->ep_mps : xfer->xfer_len;
+		}
+
+		status = xfer_func(host, xfer->xfer_buf, tx_len, xfer->pipe_id);
+		xfer->tick = host->tick;
+		if (status == HAL_OK) {
+			xfer->state = VERIFY_STATE_BUSY;
+		}
+		break;
+
+	case VERIFY_STATE_BUSY:
+		xfer_urb_state = usbh_get_urb_state(host, xfer->pipe_id);
+		if (xfer_urb_state == USBH_URB_DONE) {
+			if (usbh_get_device_speed(host) == USB_SPEED_HIGH) {
+				usbh_verify_success(xfer);
+				usbh_verify_check_for_next_loop(xfer);
+			} else {
+				if (xfer->xfer_len > xfer->ep_mps) {
+					xfer->xfer_len -= xfer->ep_mps;
+					xfer->xfer_buf += xfer->ep_mps;
+					xfer->state = VERIFY_STATE_XFER;
+				} else {
+					usbh_verify_success(xfer);
+					usbh_verify_check_for_next_loop(xfer);
+				}
+			}
+		} else if ((xfer_urb_state == USBH_URB_ERROR) || (xfer_urb_state == USBH_URB_STALL)) {
+			xfer->state = VERIFY_STATE_IDLE;
+		} else if ((xfer_urb_state == USBH_URB_BUSY) || (xfer_urb_state == USBH_URB_IDLE)) {
+			/* ISOC not support retry */
+			if (usbh_get_elapsed_ticks(host, xfer->tick) > 100) {
+				xfer->xfer_cnt++;
+				usbh_verify_check_for_next_loop(xfer);
+			}
+		}
+		break;
+	default:
+		xfer->state = VERIFY_STATE_IDLE;
+		break;
+	}
 }
 
 static void usbh_verify_ctrl_process_rx(usb_host_t *host)
@@ -476,18 +738,18 @@ static void usbh_verify_ctrl_process_rx(usb_host_t *host)
 	int ret = HAL_BUSY;
 	int loop_ctl = 1;
 	usbh_verify_host_t *verify = &usbh_verify_host;
-	usbh_verify_xfer_t *ep ;
+	usbh_verify_xfer_t *ep;
 	ep = &(verify->ctrl_in_xfer);
-	if (USBH_VERIFY_CTRL_TX & verify->ctrl_transfer_idle) {
-		return ;
+	if (USBH_VERIFY_TX == verify->ctrl_trx_state) {
+		return;
 	}
-	if (USBH_VERIFY_CTRL_IDLE == verify->ctrl_transfer_idle) {
-		verify->ctrl_transfer_idle = USBH_VERIFY_CTRL_RX;
+	if (USBH_VERIFY_TRX_IDLE == verify->ctrl_trx_state) {
+		verify->ctrl_trx_state = USBH_VERIFY_RX;
 	}
 	//RTK_LOGS(TAG, "[VFY] CTRL in Type state=%d/len=%d\n", ep->state, ep->xfer_len);
 	switch (ep->state) {
 	case VERIFY_STATE_XFER:
-		setup.b.bmRequestType = USB_D2H | USB_REQ_RECIPIENT_DEVICE | USB_REQ_TYPE_VENDOR ;
+		setup.b.bmRequestType = USB_D2H | USB_REQ_RECIPIENT_DEVICE | USB_REQ_TYPE_VENDOR;
 		setup.b.bRequest = USB_REQ_GET_DESCRIPTOR;
 		setup.b.wValue = 0x0000U;
 		setup.b.wIndex = 0x00U;
@@ -497,12 +759,12 @@ static void usbh_verify_ctrl_process_rx(usb_host_t *host)
 		if (ret == HAL_OK) {
 			usbh_verify_success(ep);
 			usbh_verify_check_indata_valid(ep);
-			verify->ctrl_transfer_idle = USBH_VERIFY_CTRL_IDLE;
+			verify->ctrl_trx_state = USBH_VERIFY_TRX_IDLE;
 			//RTK_LOGS(TAG, "[VFY] CTRL RX xferlen=%d,count=%d/%d\n", ep->xfer_len, ep->xfer_cnt, verify->test_count_limit);
-			usbh_verify_dump_buf(ep->xfer_buf, ep->xfer_len);
+			//usbh_verify_dump_buf(ep->xfer_buf, ep->xfer_len);
 			usb_os_memset((void *)ep->xfer_buf, (u8)ep->xfer_cnt, ep->xfer_len);
 			if (ep->xfer_cnt >= verify->test_count_limit) {
-				RTK_LOGS(TAG, "[VFY] CTRL RX test finish(%d/%d/%d)\n", ep->xfer_cnt, verify->test_count_limit, verify->ep_test);
+				RTK_LOGS(TAG, "[VFY] CTRL RX test finish(%d/%d/%x)\n", ep->xfer_cnt, verify->test_count_limit, verify->ep_test);
 				ep->state = VERIFY_STATE_IDLE;
 				verify->ep_test &= ~(ep->test_mask);
 				loop_ctl = 0;
@@ -539,18 +801,18 @@ static void usbh_verify_ctrl_process_tx(usb_host_t *host)
 	u8 ret = HAL_BUSY;
 	u8 loop_ctl = 1;
 	usbh_verify_host_t *verify = &usbh_verify_host;
-	usbh_verify_xfer_t *ep ;
+	usbh_verify_xfer_t *ep;
 	ep = &(verify->ctrl_out_xfer);
-	if (USBH_VERIFY_CTRL_RX & verify->ctrl_transfer_idle) {
-		return ;
+	if (USBH_VERIFY_RX == verify->ctrl_trx_state) {
+		return;
 	}
-	if (USBH_VERIFY_CTRL_IDLE == verify->ctrl_transfer_idle) {
-		verify->ctrl_transfer_idle = USBH_VERIFY_CTRL_TX;
+	if (USBH_VERIFY_TRX_IDLE == verify->ctrl_trx_state) {
+		verify->ctrl_trx_state = USBH_VERIFY_TX;
 	}
 
 	switch (ep->state) {
 	case VERIFY_STATE_XFER:
-		setup.b.bmRequestType = USB_H2D | USB_REQ_RECIPIENT_DEVICE | USB_REQ_TYPE_VENDOR ;
+		setup.b.bmRequestType = USB_H2D | USB_REQ_RECIPIENT_DEVICE | USB_REQ_TYPE_VENDOR;
 		setup.b.bRequest = VERIFY_CTRL_REQUEST_TYPE;
 		setup.b.wValue = 0x0000U;
 		setup.b.wIndex = 0x00U;
@@ -558,11 +820,11 @@ static void usbh_verify_ctrl_process_tx(usb_host_t *host)
 		ret = usbh_ctrl_request(host, &setup, ep->xfer_buf);
 		if (ret == HAL_OK) {
 			usbh_verify_success(ep);
-			verify->ctrl_transfer_idle = USBH_VERIFY_CTRL_IDLE;
+			verify->ctrl_trx_state = USBH_VERIFY_TRX_IDLE;
 			//RTK_LOGS(TAG, "[VFY] Xferlen %d count %d/%d\n", ep->xfer_len, ep->xfer_cnt, verify->test_count_limit);
 			usb_os_memset((void *)ep->xfer_buf, (u8)ep->xfer_cnt, ep->xfer_len);
 			if (ep->xfer_cnt >= verify->test_count_limit) {
-				RTK_LOGS(TAG, "[VFY] CTRL TX test finish %d/%d/%d\n", ep->xfer_cnt, verify->test_count_limit, verify->ep_test);
+				RTK_LOGS(TAG, "[VFY] CTRL TX test finish %d/%d/%x\n", ep->xfer_cnt, verify->test_count_limit, verify->ep_test);
 				ep->state = VERIFY_STATE_IDLE;
 				verify->ep_test &= ~(ep->test_mask);
 				loop_ctl = 0;
@@ -590,6 +852,45 @@ static void usbh_verify_ctrl_process_tx(usb_host_t *host)
 	if (loop_ctl) {
 		verify->next_transfor = 1;
 	}
+}
+
+int usbh_verify_xfer_process(usbh_verify_xfer_t *xfer)
+{
+	usbh_xfer_func xfer_func = NULL;
+	usbh_verify_host_t *verify = &usbh_verify_host;
+
+	xfer_func = usbh_verify_get_xfer_func(xfer);
+	if (NULL == xfer_func) {
+		return HAL_OK;
+	}
+
+	if (USB_EP_IS_OUT(xfer->ep_addr)) {
+		switch (xfer->ep_type) {
+		case USB_CH_EP_TYPE_BULK:
+			usbh_verify_bulk_process_tx(xfer);
+			break;
+		case USB_CH_EP_TYPE_INTR:
+			usbh_verify_intr_process_tx(xfer);
+			break;
+		case USB_CH_EP_TYPE_ISOC:
+			usbh_verify_isoc_process_tx(xfer);
+			break;
+		}
+	} else {
+		switch (xfer->ep_type) {
+		case USB_CH_EP_TYPE_BULK:
+			usbh_verify_bulk_process_rx(xfer);
+			break;
+		case USB_CH_EP_TYPE_INTR:
+			usbh_verify_intr_process_rx(xfer);
+			break;
+		case USB_CH_EP_TYPE_ISOC:
+			usbh_verify_isoc_process_rx(xfer);
+			break;
+		}
+	}
+	verify->next_transfor = 1;
+	return HAL_OK;
 }
 
 int usbh_verify_switch_interface(u8 if_num, u8 if_alt)
@@ -642,6 +943,7 @@ static int usbh_verify_sof(usb_host_t *host)
 
 	return HAL_OK;
 }
+#endif
 
 /**
   * @brief  Usb nak callback function.
@@ -651,23 +953,21 @@ static int usbh_verify_sof(usb_host_t *host)
   */
 static int usbh_verify_nak(usb_host_t *host, u8 pipe_id)
 {
-	u8 ep_type ;
-	usbh_verify_host_t *cdc = &usbh_verify_host;
-	if (pipe_id > USBH_MAX_PIPES_NUM) {
-		return HAL_ERR_PARA ;
+	u8 ep_type;
+	if (pipe_id > USB_MAX_PIPES) {
+		return HAL_ERR_PARA;
 	}
 
 	ep_type = usbh_get_ep_type(host, pipe_id);
 	//RTK_LOGS(TAG, "[VFY] nak type=%d/pipe_id=%d\n",ep_type,pipe_id);
-	if (ep_type == USB_CH_EP_TYPE_BULK || ep_type == USB_CH_EP_TYPE_INTR) {
-		//do not retransmit in this loop, it will do in next SOF
-		cdc->host_pipe[pipe_id] = 1;
+	if (ep_type == USB_CH_EP_TYPE_INTR) {
+		/* Do not retransmit in this loop, it will do in next SOF */
 		return HAL_OK;
 	}
 
-	return HAL_ERR_UNKNOWN ;
+	return HAL_ERR_UNKNOWN;
 }
-#endif
+
 
 /**
   * @brief  Attach callback.
@@ -755,7 +1055,7 @@ static void usbh_verify_dump_testmask(void)
 	usbh_verify_xfer_t *xfer;
 	if (verify->ep_test) {
 		RTK_LOGS(TAG, "[VFY] Ep flag=0x%08x\n", verify->ep_test);
-		for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+		for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 			xfer = verify->ep_array + ep_index;
 			if (xfer->test_mask & verify->ep_test) {
 				RTK_LOGS(TAG, "[VFY] USBH %s-0x%08x", usbh_verify_get_xfer_type_text(xfer), xfer->test_mask);
@@ -791,7 +1091,7 @@ static int usbh_verify_process(usb_host_t *host)
 		}
 
 		//loop all ep,do the loop
-		for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+		for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 			if ((verify->ep_array[ep_index].state != VERIFY_STATE_IDLE)
 				&& (PIPE_IS_VALID(verify->ep_array[ep_index].pipe_id))
 				&& (verify->ep_array[ep_index].test_mask & verify->ep_test)) {
@@ -805,12 +1105,12 @@ static int usbh_verify_process(usb_host_t *host)
 		usbh_verify_dump_testmask();
 	}
 	if (verify->next_transfor) {
-		verify->next_transfor = 0 ;
+		verify->next_transfor = 0;
 		usbh_notify_class_state_change(host);
 	} else {
 		RTK_LOGS(TAG, "[VFY] Main Process switch to idle, transfor %d, testmask 0x%08x\n", verify->next_transfor, verify->ep_test);
 		usbh_verify_dump_testmask();
-		verify->start_process = 0 ;
+		verify->start_process = 0;
 	}
 
 	return status;
@@ -890,12 +1190,22 @@ static void usbh_verify_ep_transfer(usbh_verify_xfer_t *ep, u16 size)
 
 	ep->trans_size = size;
 	usbh_verify_ep_enable(ep);
-	//ep->error_cnt = 0 ;
-	ep->xfer_cnt = 0 ;
-	ep->idle_count = 0 ;
+	//ep->error_cnt = 0;
+	ep->xfer_cnt = 0;
+	ep->idle_count = 0;
 	if (USB_EP_IS_IN(ep->ep_addr)) {
+#if INTR_ISOC_OUT_ONLY
+		if ((USB_CH_EP_TYPE_ISOC == ep->ep_type) || (USB_CH_EP_TYPE_INTR == ep->ep_type)) {
+			return;
+		}
+#endif
 		usbh_verify_receive_data(ep);
 	} else {
+#if INTR_ISOC_IN_ONLY
+		if ((USB_CH_EP_TYPE_ISOC == ep->ep_type) || (USB_CH_EP_TYPE_INTR == ep->ep_type)) {
+			return;
+		}
+#endif
 		usbh_verify_transmit_data(ep);
 	}
 	usbh_verify_dump_ep_info(ep);
@@ -906,7 +1216,7 @@ static void usbh_verify_longrun_thread(void *param)
 {
 	UNUSED(param);
 	usbh_verify_host_t *verify = &usbh_verify_host;
-	int loop = 0 ;
+	int loop = 0;
 	usbh_verifty_test_task = 1;
 	usbh_verify_wait_enum_attach();
 	do {
@@ -931,22 +1241,20 @@ static void usbh_verify_dump_allep(void)
 	usbh_verify_xfer_t *ep;
 	u8 ep_index;
 
-	RTK_LOGS(TAG, "[VFY] Out/In complete issue\n");
+	RTK_LOGS(TAG, "[VFY] OUT/IN complete issue\n");
 
 	ep = &verify->ctrl_out_xfer;
-	RTK_LOGS(TAG, "[VFY] CTRL out done%d/err%d mask %08x\n", ep->total_xfer_cnt, ep->error_cnt, ep->test_mask);
+	RTK_LOGS(TAG, "\tCTRL OUT done%d/err%d mask %08x\n", ep->total_xfer_cnt, ep->error_cnt, ep->test_mask);
 	ep = &verify->ctrl_in_xfer;
-	RTK_LOGS(TAG, "[VFY] CTRL in done%d/err%d mask%08x\n", ep->total_xfer_cnt, ep->error_cnt, ep->test_mask);
+	RTK_LOGS(TAG, "\tCTRL  IN done%d/err%d mask %08x\n", ep->total_xfer_cnt, ep->error_cnt, ep->test_mask);
 
 	/* Loop All EP */
-	for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+	for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 		ep = verify->ep_array + ep_index;
-		RTK_LOGS(TAG, "[VFY] \t%s%3s done%d/err%d", usbh_verify_get_xfer_type_text(ep),
-				 (USB_EP_IS_IN(ep->ep_addr) ? ("IN") : ("OUT")),
-				 ep->total_xfer_cnt, ep->error_cnt);
-
-		RTK_LOGS(TAG, "[VFY] State %d mask %08x EP%02x/pipe %d MPS %d transize %d type %d interval %d\n",
-				 ep->state, ep->test_mask, ep->ep_addr, ep->pipe_id,
+		RTK_LOGS(TAG, "\t%s %3s done%d/err%d mask %08x EP%02x/pipe %d MPS %d transize %d type %d interval %d\n", usbh_verify_get_xfer_type_text(ep),
+				 (USB_EP_IS_IN(ep->ep_addr) ? "IN" : "OUT"),
+				 ep->total_xfer_cnt, ep->error_cnt,
+				 ep->test_mask, ep->ep_addr, ep->pipe_id,
 				 ep->ep_mps, ep->trans_size, ep->ep_type, ep->ep_interval);
 	}
 }
@@ -954,7 +1262,7 @@ static void usbh_verify_dump_allep(void)
 static void usbh_verify_ep_status_thread(void *param)
 {
 	UNUSED(param);
-	int loop = 0 ;
+	int loop = 0;
 	usbh_verify_host_t *verify = &usbh_verify_host;
 	usbh_verifty_status_task = 1;
 	usbh_verify_wait_enum_attach();
@@ -962,7 +1270,7 @@ static void usbh_verify_ep_status_thread(void *param)
 	do {
 		loop++;
 		if (loop >= 3) {
-			loop = 0 ;
+			loop = 0;
 			usbh_verify_dump_allep();
 		}
 		RTK_LOGS(TAG, "[VFY] Next_transfor %d, testmask 0x%08x\n", verify->next_transfor, verify->ep_test);
@@ -982,7 +1290,10 @@ int usbh_verify_init(usbh_verify_cb_t *cb)
 
 	usb_os_memset((void *)verify, 0x00, sizeof(usbh_verify_host_t));
 	verify->test_count_limit = 100;//default
-	verify->ctrl_transfer_idle = USBH_VERIFY_CTRL_IDLE;
+	verify->ctrl_trx_state = USBH_VERIFY_TRX_IDLE;
+	verify->bulk_trx_state = USBH_VERIFY_TRX_IDLE;
+	verify->intr_trx_state = USBH_VERIFY_TRX_IDLE;
+	verify->isoc_trx_state = USBH_VERIFY_TRX_IDLE;
 
 	if (cb != NULL) {
 		verify->cb = cb;
@@ -1008,7 +1319,7 @@ int usbh_verify_deinit(void)
 
 	if ((host != NULL) && (host->state == USBH_CLASS_READY)) {
 		verify->usbh_state = USBH_VERIFY_IDLE;
-		for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+		for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 			usbh_verify_ep_disable(host, verify->ep_array + ep_index);
 		}
 	}
@@ -1038,23 +1349,28 @@ int usbh_verify_ep_enable(usbh_verify_xfer_t *xfer)
 		goto exit;
 	}
 
-	xfer->xfer_len = xfer->trans_size;
-	xfer->xfer_buf = (u8 *)usb_os_malloc(xfer->ep_mps);
-	if (xfer->xfer_buf == NULL) {
-		status = HAL_ERR_MEM;
-		goto alloc_xfer_buf_fail_exit;
-	}
-
 	status = usbh_open_pipe(host, xfer->pipe_id, xfer->ep_addr, xfer->ep_type, xfer->ep_mps);
 	if (status != HAL_OK) {
 		status = HAL_ERR_HW;
 		RTK_LOGS(TAG, "[VFY] Open pipe %02x fail\n", xfer->pipe_id);
 		goto open_pipe_fail_exit;
 	}
-	xfer->init_done = 1;
 
 param_reinit:
-	usb_os_memset((void *)xfer->xfer_buf, TRANSFER_DATA_VALUE_BASE, xfer->ep_mps);
+	xfer->xfer_len = xfer->trans_size;
+	if (xfer->xfer_buf) {
+		usb_os_mfree(xfer->xfer_buf);
+		xfer->xfer_buf = NULL;
+	}
+
+	xfer->xfer_buf = (u8 *)usb_os_malloc(xfer->xfer_len);
+	if (xfer->xfer_buf == NULL) {
+		status = HAL_ERR_MEM;
+		goto alloc_xfer_buf_fail_exit;
+	}
+	xfer->init_done = 1;/* Only init pipe once, paras can re-init */
+
+	usb_os_memset((void *)xfer->xfer_buf, TRANSFER_DATA_VALUE_BASE, xfer->xfer_len);
 	xfer->xfer_bk_buf = xfer->xfer_buf;
 	xfer->tick = 0;
 	xfer->state = VERIFY_STATE_IDLE;
@@ -1062,10 +1378,10 @@ param_reinit:
 
 	return status;
 
-open_pipe_fail_exit:
+alloc_xfer_buf_fail_exit:
 	usb_os_mfree(xfer->xfer_buf);
 	xfer->xfer_buf = NULL;
-alloc_xfer_buf_fail_exit:
+open_pipe_fail_exit:
 	usbh_free_pipe(host, xfer->pipe_id);
 	xfer->pipe_id = USBH_PIPE_VALID_VALUE;
 exit:
@@ -1115,7 +1431,7 @@ void usbh_verify_wait_enum_attach(void)
 void usbh_verify_ctrl_transfer(u16 size, u8 is_out)
 {
 	usbh_verify_host_t *verify = &usbh_verify_host;
-	usbh_verify_xfer_t *ep ;
+	usbh_verify_xfer_t *ep;
 	usbh_verify_wait_enum_attach();
 
 	if (is_out) {
@@ -1123,11 +1439,11 @@ void usbh_verify_ctrl_transfer(u16 size, u8 is_out)
 	} else {
 		ep = &verify->ctrl_in_xfer;
 	}
-	ep->xfer_cnt = 0 ;
-	ep->idle_count = 0 ;
+	ep->xfer_cnt = 0;
+	ep->idle_count = 0;
 	ep->expect_data = TRANSFER_DATA_VALUE_BASE;
 	ep->trans_size = size;
-	ep->xfer_len = size ;
+	ep->xfer_len = size;
 	if (ep->xfer_buf) {
 		usb_os_mfree(ep->xfer_buf);
 	}
@@ -1153,13 +1469,13 @@ void usbh_verify_transfer_by_eptype(u16 size, u8 type)
 		ep = &(verify->ctrl_in_xfer);
 		usbh_verify_ctrl_transfer(size, 0);
 	} else {
-		for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+		for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 			ep = verify->ep_array + ep_index;
 			if (ep && USB_EP_IS_IN(ep->ep_addr) && (type == ep->ep_type)) {
 				usbh_verify_ep_transfer(ep, size);
 			}
 		}
-		for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+		for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 			ep = verify->ep_array + ep_index;
 			if (ep && USB_EP_IS_OUT(ep->ep_addr) && (type == ep->ep_type)) {
 				usbh_verify_ep_transfer(ep, size);
@@ -1176,13 +1492,13 @@ void usbh_verify_allep_transfer(u16 size)
 
 	usbh_verify_transfer_by_eptype(size, USB_CH_EP_TYPE_CTRL);
 
-	for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+	for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 		ep = verify->ep_array + ep_index;
 		if (ep && USB_EP_IS_IN(ep->ep_addr)) {
 			usbh_verify_ep_transfer(ep, size);
 		}
 	}
-	for (ep_index = 0 ; ep_index < verify->ep_count; ep_index++) {
+	for (ep_index = 0; ep_index < verify->ep_count; ep_index++) {
 		ep = verify->ep_array + ep_index;
 		if (ep && USB_EP_IS_OUT(ep->ep_addr)) {
 			usbh_verify_ep_transfer(ep, size);
@@ -1256,7 +1572,8 @@ void usbh_verify_ep_debug_dump(void)
 	RTK_LOGS(TAG, "[VFY] Test mask %d\n", verify->ep_test);
 	RTK_LOGS(TAG, "[VFY] Next trans %d\n", verify->next_transfor);
 	RTK_LOGS(TAG, "[VFY] Looptimes %d\n", verify->test_count_limit);
-	RTK_LOGS(TAG, "[VFY] Ctrl status %d\n", verify->ctrl_transfer_idle);
+	RTK_LOGS(TAG, "[VFY] Ctrl-Bulk-Intr-Isoc trxsts %d %d %d %d\n",
+			 verify->ctrl_trx_state, verify->bulk_trx_state, verify->intr_trx_state, verify->isoc_trx_state);
 
 	usbh_verify_dump_allep();
 }

@@ -24,7 +24,7 @@ SECTIONS
 		SRAM_INPUT_TEXT_SECTION
 		__sram_image2_end__ = .;
 		. = ALIGN(32);
-		
+
 		*port.o(*.uxIdleTaskStack*)
 		*port.o(*.uxTimerTaskStack*)
 		

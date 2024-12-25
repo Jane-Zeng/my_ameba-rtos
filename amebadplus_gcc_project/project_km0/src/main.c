@@ -65,11 +65,6 @@ void app_IWDG_refresh(void *arg)
 
 void app_IWDG_int(void)
 {
-	/* usually IWDG will enable by HW, and the bark interval is 4095ms by default */
-	if (0 == (HAL_READ32(SYSTEM_CTRL_BASE, REG_AON_FEN) & APBPeriph_IWDG)) {
-		return;
-	}
-
 	IWDG_LP_Enable(IWDG_DEV, DISABLE);
 	RTK_LOGI(TAG, "IWDG refresh on!\n");
 
@@ -97,13 +92,6 @@ int main(void)
 	/* Debug log control */
 	app_init_debug();
 
-	shell_init_rom(0, NULL);
-	shell_init_ram();
-	/* Register Log Uart Callback function */
-	InterruptRegister((IRQ_FUN) shell_uart_irq_rom, UART_LOG_IRQ, (u32)NULL, INT_PRI_LOWEST);
-	InterruptEn(UART_LOG_IRQ, INT_PRI_LOWEST);
-	LOGUART_INTCoreConfig(LOGUART_DEV, LOGUART_BIT_INTR_MASK_KM0, ENABLE);
-
 	InterruptRegister((IRQ_FUN)IPC_INTHandler, IPC_KM0_IRQ, (u32)IPCKM0_DEV, INT_PRI_MIDDLE);
 	InterruptEn(IPC_KM0_IRQ, INT_PRI_MIDDLE);
 
@@ -111,7 +99,7 @@ int main(void)
 	ipc_table_init(IPCKM0_DEV);
 
 	app_pmu_init();
-#ifdef CONFIG_MBED_TLS_ENABLED
+#ifdef CONFIG_MBEDTLS_ENABLED
 	app_mbedtls_rom_init();
 #endif
 
@@ -122,6 +110,13 @@ int main(void)
 #ifdef CONFIG_WLAN
 	wlan_initialize();
 #endif
+
+	shell_init_rom(0, NULL);
+	shell_init_ram();
+	/* Register Log Uart Callback function */
+	InterruptRegister((IRQ_FUN) shell_uart_irq_rom, UART_LOG_IRQ, (u32)NULL, INT_PRI_LOWEST);
+	InterruptEn(UART_LOG_IRQ, INT_PRI_LOWEST);
+	LOGUART_INTCoreConfig(LOGUART_DEV, LOGUART_BIT_INTR_MASK_KM0, ENABLE);
 
 	app_IWDG_int();
 

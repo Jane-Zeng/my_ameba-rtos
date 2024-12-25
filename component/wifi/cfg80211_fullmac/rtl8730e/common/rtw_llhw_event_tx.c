@@ -13,6 +13,11 @@ void llhw_send_event(u32 id, u8 *param, u32 param_len, u8 *ret, u32 ret_len)
 
 	dev_dbg(global_idev.fullmac_dev, "-----HOST CALLING API %x START\n", id);
 
+#ifdef CONFIG_FULLMAC_HCI_USB
+	if (rtw_usb_send_event_check(id) < 0) {
+		return;
+	}
+#endif
 	mutex_lock(&(event_priv->send_mutex));
 
 	/* send TX_DESC + info + data(param, param_len) */
@@ -30,9 +35,10 @@ void llhw_send_event(u32 id, u8 *param, u32 param_len, u8 *ret, u32 ret_len)
 		}
 
 		/* send */
-		llhw_send_data(buf, buf_len);
-
+		llhw_send_data(buf, buf_len, NULL);
+#ifndef CONFIG_INIC_USB_ASYNC_SEND
 		kfree(buf);
+#endif
 	} else {
 		dev_err(global_idev.fullmac_dev, "%s can't alloc buffer!\n", __func__);
 		goto exit;
@@ -122,7 +128,7 @@ int llhw_wifi_set_mac_addr(u32 wlan_idx, u8 *addr)
 	return ret;
 }
 
-int llhw_wifi_scan(struct _rtw_scan_param_t *scan_param, u32 ssid_length, u32 block)
+int llhw_wifi_scan(struct _rtw_scan_param_t *scan_param, u32 ssid_length, u8 block)
 {
 	int ret = 0;
 	u32 size;
@@ -232,7 +238,6 @@ int llhw_wifi_connect(struct _rtw_network_info_t *connect_param, unsigned char b
 		   sizeof(connect_param->channel) +
 		   sizeof(connect_param->pscan_option) +
 		   sizeof(connect_param->is_wps_trigger) +
-		   sizeof(u32) +
 		   sizeof(connect_param->wpa_supp) +
 		   sizeof(connect_param->prev_bssid) +
 		   connect_param->password_len;
@@ -262,9 +267,6 @@ int llhw_wifi_connect(struct _rtw_network_info_t *connect_param, unsigned char b
 
 	memcpy(ptr, &connect_param->is_wps_trigger, sizeof(connect_param->is_wps_trigger));
 	ptr += sizeof(connect_param->is_wps_trigger);
-
-	memcpy(ptr, &connect_param->joinstatus_user_callback, sizeof(u32));
-	ptr += sizeof(u32);
 
 	memcpy(ptr, &connect_param->wpa_supp, sizeof(connect_param->wpa_supp));
 	ptr += sizeof(connect_param->wpa_supp);
@@ -764,7 +766,7 @@ int llhw_wifi_set_wps_phase(u8 enable)
 	return ret;
 }
 
-int llhw_wifi_set_wpa_mode(rtw_wpa_mode wpa_mode)
+int llhw_wifi_set_wpa_mode(u8 wpa_mode)
 {
 	int ret = 0;
 	u32 param_buf[1];
@@ -1029,3 +1031,15 @@ int llhw_wifi_driver_is_mp(void)
 	return ret;
 }
 
+int wifi_btcoex_bt_hci_notify(uint8_t *pdata, uint16_t len, uint8_t dir)
+{
+	int ret = 0;
+
+	(void) pdata;
+	(void) len;
+	(void) dir;
+
+	dev_err(global_idev.fullmac_dev, "%s: not support\n", __func__);
+
+	return ret;
+}

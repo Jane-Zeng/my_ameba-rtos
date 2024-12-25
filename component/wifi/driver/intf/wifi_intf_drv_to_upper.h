@@ -37,12 +37,6 @@ extern "C" {
 #define		_48M_RATE_		10
 #define		_54M_RATE_		11
 
-enum WIFI_INDICATE_MODE {
-	WIFI_INDICATE_DISABLE = 0,
-	WIFI_INDICATE_NORMAL = 1,
-	WIFI_INDICATE_WILD = 2,
-	WIFI_INDICATE_MAX,
-};
 //----- ------------------------------------------------------------------
 // Wlan Interface opened for upper layer
 //----- ------------------------------------------------------------------
@@ -88,10 +82,8 @@ int rtw_p2p_remain_on_ch(u8 wlan_idx, u8 enable);
 void rtw_single_thread_wakeup(void);
 #endif
 
-#ifdef CONFIG_WIFI_TUNNEL
-extern int wifi_tunnel_command(char *cmd);
-#define rtw_wltunnel_command(cmd) wifi_tunnel_command(cmd)
-#endif
+int rtw_wltunnel_command(char *cmd);
+
 #ifdef	__cplusplus
 }
 #endif

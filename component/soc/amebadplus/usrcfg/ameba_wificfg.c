@@ -15,19 +15,23 @@ struct wifi_user_conf wifi_user_config __attribute__((aligned(64)));
 
 _WEAK void wifi_set_user_config(void)
 {
-	memset(&wifi_user_config, 0, sizeof(struct wifi_user_conf));
+	_memset(&wifi_user_config, 0, sizeof(struct wifi_user_conf));
 
 	/* below items for user config, for details, see wifi_user_conf in wifi_intf_drv_to_app_basic.h */
 	wifi_user_config.concurrent_enabled = 1;
 	wifi_user_config.softap_addr_offset_idx = 1;
-	wifi_user_config.auto_reconnect_count = 8;
+	wifi_user_config.auto_reconnect_count = 10;
 	wifi_user_config.auto_reconnect_interval = 5;
 	wifi_user_config.no_beacon_disconnect_time = 9;  /* unit 2s, default 18s */
 
-#if (defined(CONFIG_INIC_INTF_SDIO) || defined(CONFIG_INIC_INTF_SPI) || defined(CONFIG_INIC_INTF_USB))
-	wifi_user_config.skb_num_np = 20;  /*4 for rx_ring_buffer + 4 for rx_ampdu + 2 for mgnt trx + 4 for spido rx_ring_buffer */
+#if (defined(CONFIG_INIC_INTF_SDIO) || defined(CONFIG_INIC_INTF_USB))
+	wifi_user_config.skb_num_np = 20;  /*4 for rx_ring_buffer + 8 for rx_ampdu + 2 for mgnt trx + 4 for spido rx_ring_buffer */
 	wifi_user_config.skb_num_ap = 0;
 	wifi_user_config.rx_ampdu_num = 8;
+#elif defined(CONFIG_INIC_INTF_SPI)
+	wifi_user_config.skb_num_np = 14;  /*4 for rx_ring_buffer + 4 for rx_ampdu + 2 for mgnt trx + 1 for spi rx_dma_buffer */
+	wifi_user_config.skb_num_ap = 0;
+	wifi_user_config.rx_ampdu_num = 4;
 #else
 
 #ifdef CONFIG_HIGH_TP_TEST /*enable high tp in make menuconfig*/
@@ -36,6 +40,9 @@ _WEAK void wifi_set_user_config(void)
 	wifi_user_config.rx_ampdu_num = 8;
 #else
 	wifi_user_config.skb_num_np = 10;  /*4 for rx_ring_buffer + 4 for rx_ampdu + 2 for mgnt trx*/
+#ifdef CONFIG_WIFI_TUNNEL
+	wifi_user_config.skb_num_np = 20;  /*4 for rx_ring_buffer + 4 for rx_ampdu + 2 for mgnt trx + 10 for tunnel tx */
+#endif
 	wifi_user_config.skb_num_ap = 4;
 	wifi_user_config.rx_ampdu_num = 4;
 #endif
@@ -97,6 +104,9 @@ _WEAK void wifi_set_user_config(void)
 
 	/* wifi speaker */
 	wifi_user_config.wifi_speaker_feature = 0;
+
+	/*Automatic channel selection*/
+	wifi_user_config.acs_en = 0;
 
 }
 

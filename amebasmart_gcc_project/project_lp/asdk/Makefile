@@ -71,9 +71,8 @@ endif
 
 image2:LINK_APP_LIB += $(ROOTDIR)/lib/soc/lib_pmc.a $(ROOTDIR)/lib/soc/lib_chipinfo.a $(ROOTDIR)/lib/soc/lib_crashdump.a
 
-all: prebuild copy_ld_ram make_subdirs linker_image2
 image2: prebuild copy_ld_img2 make_subdirs linker_image2
-lib_image2: prebuild copy_ld_img2 make_subdirs_lib
+lib_image2: prebuild make_subdirs_lib
 #*****************************************************************************#
 #                      RULES TO CREATE DIRECTORY                              #
 #*****************************************************************************#
@@ -161,6 +160,28 @@ linker_image2:
 	fi
 
 	$(Q)$(IMAGETOOL) $(IMAGE_TARGET_FOLDER)/km0_image2_all.bin $(BUILD_TYPE)
+
+ifeq ($(CONFIG_FATFS_WITHIN_APP_IMG), y)
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin ] && [ -f $(BASEDIR)/amebasmart_gcc_project/fatfs.bin ]; then \
+		mv $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_tmp.bin; \
+		mv $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns.bin $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns_tmp.bin; \
+		$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_tmp.bin 4096; \
+		$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns_tmp.bin 4096; \
+		$(PREPENDTOOL) $(BASEDIR)/amebasmart_gcc_project/fatfs.bin  VFS1_FLASH_BASE_ADDR  $(IMAGE_TARGET_FOLDER)/target_img2.map; \
+		cat $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_tmp.bin $(BASEDIR)/amebasmart_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin; \
+		cat $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns_tmp.bin $(BASEDIR)/amebasmart_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns.bin; \
+	else \
+		if [ -f $(KM4_BUILDDIR)/asdk/image/km0_km4_app.bin ] && [ -f $(BASEDIR)/amebasmart_gcc_project/fatfs.bin ]; then \
+			mv $(KM4_BUILDDIR)/asdk/image/km0_km4_app.bin $(KM4_BUILDDIR)/asdk/image/km0_km4_app_tmp.bin; \
+			mv $(KM4_BUILDDIR)/asdk/image/km0_km4_app_ns.bin $(KM4_BUILDDIR)/asdk/image/km0_km4_app_ns_tmp.bin; \
+			$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_app_tmp.bin 4096; \
+			$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_app_ns_tmp.bin 4096; \
+			$(PREPENDTOOL) $(BASEDIR)/amebasmart_gcc_project/fatfs.bin  VFS1_FLASH_BASE_ADDR  $(IMAGE_TARGET_FOLDER)/target_img2.map; \
+			cat $(KM4_BUILDDIR)/asdk/image/km0_km4_app_tmp.bin $(BASEDIR)/amebasmart_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/km0_km4_app.bin; \
+			cat $(KM4_BUILDDIR)/asdk/image/km0_km4_app_ns_tmp.bin $(BASEDIR)/amebasmart_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/km0_km4_app_ns.bin; \
+		fi \
+	fi
+endif
 
 ifeq ($(CONFIG_UPGRADE_BOOTLOADER), y)
 	@if [ -f $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin ]; then \
@@ -292,22 +313,10 @@ clean_all: clean
 #*****************************************************************************#
 #              PACKAGE COPY link script file-ld                               #
 #*****************************************************************************#
-copy_ld_ram:
-	$(Q)$(COPY) $(ROOTDIR)/ld/rlx8721d_ram.ld $(BUILD_TARGET_FOLDER)/rlx8721d.ld
-	$(Q)cat $(LINK_ROM_SYMBOL) >> $(BUILD_TARGET_FOLDER)/rlx8721d.ld
-copy_ld_img1:
-	$(Q)$(COPY) $(ROOTDIR)/ld/rlx8721d_boot.ld $(BUILD_TARGET_FOLDER)/rlx8721d.ld
-	$(Q)cat $(LINK_ROM_SYMBOL) >> $(BUILD_TARGET_FOLDER)/rlx8721d.ld
 copy_ld_img2:
 ifeq ($(CONFIG_XIP_FLASH),y)
-	$(Q)$(COPY) $(ROOTDIR)/ld/rlx8721d_img2_xip.ld  $(BUILD_TARGET_FOLDER)/rlx8721d.ld
+	$(Q) $(CC) -E -P -xc -c $(ROOTDIR)/ld/rlx8721d_img2_sram.ld -o $(BUILD_TARGET_FOLDER)/rlx8721d.ld
 else
-	$(Q)$(COPY) $(ROOTDIR)/ld/rlx8721d_img2_sram.ld  $(BUILD_TARGET_FOLDER)/rlx8721d.ld
+	$(Q) $(CC) -E -P -xc -c $(ROOTDIR)/ld/rlx8721d_img2_sram.ld -o $(BUILD_TARGET_FOLDER)/rlx8721d.ld
 endif
 	$(Q)cat $(LINK_ROM_SYMBOL) >> $(BUILD_TARGET_FOLDER)/rlx8721d.ld
-copy_ld_floader:
-	$(Q)$(COPY) $(ROOTDIR)/ld/rlx8721d_boot.ld $(BUILD_TARGET_FOLDER)/rlx8721d.ld
-ifeq ($(CONFIG_LINK_ROM_SYMB),y)
-	$(Q)cat ./ld/rlx8721d_rom_symbol.ld >> $(BUILD_TARGET_FOLDER)/rlx8721d.ld
-endif
-

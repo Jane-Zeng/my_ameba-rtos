@@ -13,7 +13,7 @@
 #ifdef CONFIG_MP_INCLUDED
 #define SHELL_TASK_FUNC_STACK_SIZE (1024 * 4)
 #elif (defined (CONFIG_AS_INIC_AP) || defined(CONFIG_SINGLE_CORE_WIFI))
-#define SHELL_TASK_FUNC_STACK_SIZE (1504 + 128 + CONTEXT_SAVE_SIZE + 1024)
+#define SHELL_TASK_FUNC_STACK_SIZE (1504 + 128 + CONTEXT_SAVE_SIZE + 1152)
 #else
 #define SHELL_TASK_FUNC_STACK_SIZE (744 + 128 + CONTEXT_SAVE_SIZE)	/* 744 for cmd_efuse_protect, when kr4 as ap */
 #endif
@@ -80,7 +80,7 @@ typedef struct {
 
 #define KB_SPACENO_TAB  1
 
-#define _ConsolePrint  DiagPrintf_minimal
+#define _ConsolePrint  DiagPrintfNano
 
 #define AMEBA_CONSOLE_PREFIX	"#"
 #define CONSOLE_AMEBA(...)     do {\

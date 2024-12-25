@@ -28,8 +28,8 @@
  * < CONFIG Shell CMD
  */
 #define CONFIG_SUPPORT_ATCMD 1
-#define CONFIG_ATCMD_IO_LOGUART 1
-#undef  CONFIG_ATCMD_IO_UART
+#define CONFIG_ATCMD_LOGUART 1
+#undef  CONFIG_ATCMD_MCU_CONTROL
 #undef  CONFIG_LONGER_CMD
 
 /*
@@ -42,6 +42,7 @@
  * < CONFIG OTA OPTION
  */
 #undef  CONFIG_UPGRADE_BOOTLOADER
+#undef  CONFIG_COMPRESS_OTA_IMG
 
 /*
  * < CONFIG Application Processor
@@ -69,11 +70,16 @@
 #define CONFIG_LWIP_LAYER 1
 #undef  CONFIG_ENABLE_WPS
 #undef  CONFIG_WIFI_CSI_ENABLE
+#undef  CONFIG_WIFI_ANTDIV_ENABLE
+#undef  CONFIG_WIFI_11K_ENABLE
+#undef  CONFIG_WIFI_11V_ENABLE
+#undef  CONFIG_WIFI_11R_ENABLE
 
 /*
  * < CONFIG LWIP
  */
 #undef  CONFIG_FAST_DHCP
+#undef  CONFIG_LWIP_DEBUG
 
 
 /*
@@ -84,15 +90,14 @@
  * < CONFIG CHIP
  */
 #define CONFIG_AMEBALITE 1
-#define ARM_CORE_CM4 1
+#define CONFIG_ARM_CORE_CM4 1
 #undef  CONFIG_FPGA
-#define CONFIG_AMEBALITE_A_CUT 1
 
 /*
  * < CONFIG OS
  */
 #define CONFIG_KERNEL 1
-#define PLATFORM_FREERTOS 1
+#define CONFIG_PLATFORM_FREERTOS 1
 #define TASK_SCHEDULER_DISABLED (0)
 
 /*
@@ -109,7 +114,7 @@
  * < SSL Config
  */
 #define CONFIG_USE_MBEDTLS_ROM 1
-#define CONFIG_MBED_TLS_ENABLED 1
+#define CONFIG_MBEDTLS_ENABLED 1
 #undef  CONFIG_SSL_ROM_TEST
 
 /*
@@ -122,6 +127,12 @@
  */
 #undef  CONFIG_AUDIO_FWK
 #undef  CONFIG_MEDIA_PLAYER
+
+/*
+ * Third Party Lib
+ */
+#undef  CONFIG_SPEEX_LIB
+#undef  CONFIG_OPUS_LIB
 
 /*
  * < CONFIG IPC Message Queue

@@ -10,7 +10,7 @@ static uint8_t dhcp_server_state_machine = DHCP_SERVER_STATE_IDLE;
 /* recorded transaction ID (default sudo id)*/
 static uint8_t dhcp_recorded_xid[4] = {0xff, 0xff, 0xff, 0xff};
 
-#define printf	DiagPrintf_minimal
+#define printf	DiagPrintfNano
 
 /* UDP Protocol Control Block(PCB) */
 static struct udp_pcb *dhcps_pcb;
@@ -134,8 +134,8 @@ static void save_client_addr(struct ip_addr *client_ip, uint8_t *hwaddr)
 	int i, j;
 	uint8_t invalid_ipaddr4;
 	unsigned int client_number;
-	rtw_client_list_t client_info;
-	memset(&client_info, 0, sizeof(rtw_client_list_t));
+	struct _rtw_client_list_t client_info;
+	memset(&client_info, 0, sizeof(struct _rtw_client_list_t));
 
 	uint8_t d = (uint8_t)ip4_addr4(ip_2_ip4(client_ip));
 
@@ -941,7 +941,7 @@ static void dnss_receive_udp_packet_handler(
 
 #if(defined(CONFIG_ENABLE_CAPTIVE_PORTAL) && CONFIG_ENABLE_CAPTIVE_PORTAL)
 	if (1) {
-		uint8_t len = strlen((uint8_t *) hdr + sizeof(struct dns_hdr)) + 1;
+		uint8_t len = strlen((const char *) hdr + sizeof(struct dns_hdr)) + 1;
 		struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct dns_hdr) + len + 20, PBUF_RAM);
 #else
 	if (memcmp((uint8_t *) hdr + sizeof(struct dns_hdr), domain_name_buf, sizeof(domain_name_buf)) == 0) {

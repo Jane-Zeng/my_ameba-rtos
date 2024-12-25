@@ -21,6 +21,11 @@ INCDIR		=$(ROOTDIR)/../inc
 BASEDIR		= $(ROOTDIR)/../../..
 KR4_BUILDDIR	= $(ROOTDIR)/../../project_kr4
 KM4_BUILDDIR	= $(ROOTDIR)/../../project_km4
+ifeq ($(findstring y, $(CONFIG_AS_INIC_AP) $(CONFIG_SINGLE_CORE_WIFI)), y)
+AP_IMAGEDIR		= $(KR4_BUILDDIR)/vsdk/image
+else
+AP_IMAGEDIR		= $(KM4_BUILDDIR)/asdk/image
+endif
 
 TARGETDIR	=$(BASEDIR)/component/soc/amebalite
 BOOTLOADER	=$(BASEDIR)/component/soc/amebalite/bootloader
@@ -52,6 +57,7 @@ PREPENDTOOL		= python $(IMAGESCRIPTDIR)/axf2bin.py prepend_header
 OTAPREPENDTOOL  = python $(IMAGESCRIPTDIR)/axf2bin.py ota_prepend_header
 PADTOOL = python $(IMAGESCRIPTDIR)/axf2bin.py pad
 IMAGETOOL = python $(IMAGESCRIPTDIR)/axf2bin.py imagetool
+COMPRESSTOOL = python $(IMAGESCRIPTDIR)/axf2bin.py compress
 LXDIALOG_CYGWIN_STATIC 	= $(UTILITYDIR)/lxdialog_prebuilt/lxdialog_cygwin_x86_static.exe
 COMPILEOS		= $(shell uname -o)
 COMPILEOS_CYGWIN	= $(shell uname -o | cut -c 1-6)
@@ -90,11 +96,14 @@ ifeq ($(COMPILEOS),$(LINUX_OS))
 VSDK_TOOLCHAIN = $(TOOLCHAINDIR)/vsdk-$(VSDK_VER)/linux/newlib
 TOOLCHAINNAME = vsdk-10.3.1-linux-newlib-build-4073-x86_64.tar.bz2
 TOOLCHAINURL	= https://github.com/Ameba-AIoT/ameba-toolchain/releases/download/10.3.1/vsdk-10.3.1-linux-newlib-build-4073-x86_64.tar.bz2
+TOOLCHAINURL_ALIYUN	= https://rs-wn.oss-cn-shanghai.aliyuncs.com/vsdk-10.3.1-linux-newlib-build-4073-x86_64.tar.bz2
 else
 VSDK_TOOLCHAIN = $(TOOLCHAINDIR)/vsdk-$(VSDK_VER)/mingw32/newlib
 TOOLCHAINNAME = vsdk-10.3.1-mingw32-newlib-build-4073-x86_64.zip
 TOOLCHAINURL	= https://github.com/Ameba-AIoT/ameba-toolchain/releases/download/10.3.1/vsdk-10.3.1-mingw32-newlib-build-4073-x86_64.zip
+TOOLCHAINURL_ALIYUN = https://rs-wn.oss-cn-shanghai.aliyuncs.com/vsdk-10.3.1-mingw32-newlib-build-4073-x86_64.zip
 endif
+TOOLCHAINVER = 4073
 VSDK_TOOLCHAIN_LIBPATH = $(VSDK_TOOLCHAIN)/lib/gcc/riscv32-none-elf/$(VSDK_VER)/rv32imafc/ilp32f
 
 tool_dir = $(VSDK_TOOLCHAIN)/bin
@@ -276,6 +285,7 @@ GLOBAL_CFLAGS += -MMD -MP
 GLOBAL_CFLAGS += $(IFLAGS)
 GLOBAL_CFLAGS += -DCONFIG_PLATFORM_AMEBALITE -DRISC_V
 GLOBAL_CFLAGS += -Wall
+GLOBAL_CFLAGS += -Werror
 GLOBAL_CFLAGS += -fno-tree-loop-distribute-patterns
 GLOBAL_CFLAGS += -flax-vector-conversions
 GLOBAL_CFLAGS += -nodefaultlibs
@@ -374,7 +384,20 @@ ROM_LD_ARG += -msafe-relax
 #*****************************************************************************#
 #                      RULES TO CHECK TOOLCHAIN                               #
 #*****************************************************************************#
-check_toolchain:
+CURRENTVER = `$(CC) --version`
+define check_toolchain_version_func
+	@echo "Checking for gcc == $(TOOLCHAINVER)..."
+	@if $(CC) --version | grep -q '$(TOOLCHAINVER)'; then \
+		echo "Toolchain Version Matched"; \
+	else \
+		echo "$(CURRENTVER)"; \
+		echo "Warning: Current Toolchain Version Mismatched!"; \
+		echo "Warning: Please delete current toolchain /vsdk-$(VSDK_VER) in $(TOOLCHAINDIR) and redo make. The Latest ToolChain $(TOOLCHAINNAME) will be installed automatically during the project building"; \
+		exit 1; \
+	fi
+endef
+
+define download_toolchain_func
 	@if [ -d $(VSDK_TOOLCHAIN) ]; then \
 		echo "ToolChain Had Existed"; \
 	else \
@@ -386,7 +409,7 @@ check_toolchain:
 			echo "Create Toolchain Dir Failed. May Not Have Permission. Please Refer To README.MD Or AN900 Chapter 1.3(Installing Toolchain)."; \
 			exit 1; \
 		fi; \
-		if wget -P $(TOOLCHAINDIR) $(TOOLCHAINURL); then \
+		if wget -P $(TOOLCHAINDIR) $(1); then \
 			echo "Download $(TOOLCHAINNAME) Success"; \
 		else \
 			echo "Download Failed. Please Check If The Network Connection Is Accessible Or Refer To AN900 Chapter 1.3(Installing Toolchain)."; \
@@ -400,6 +423,11 @@ check_toolchain:
 		fi; \
 		echo "INSTALL SUCCESS"; \
 	fi
+endef
+
+check_toolchain:
+	$(call download_toolchain_func,$(TOOLCHAINURL))
+	$(call check_toolchain_version_func)
 	# check permission
 	@if [ ! "$(shell which python)" ]; then \
 		echo "Command python not found"; \

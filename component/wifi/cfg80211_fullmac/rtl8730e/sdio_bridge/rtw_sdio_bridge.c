@@ -16,7 +16,7 @@ extern void llhw_send_event(u32 id, u8 *param, u32 param_len, u8 *ret, u32 ret_l
 
 int llhw_sdio_bridge_connect(char *ssid, char *pwd)
 {
-	rtw_network_info_t wifi = {0};
+	struct _rtw_network_info_t wifi = {0};
 	unsigned char password[129] = {0};
 	int ret = 0;
 
@@ -68,9 +68,9 @@ void llhw_sdio_bridge_get_scan_result(u32 ap_num)
 	if (g_scan_buf && scan_buf) {
 		kfree((void *)scan_buf);
 	}
-	scan_buf = (u8 *)kzalloc(ap_num * sizeof(rtw_scan_result_t), GFP_KERNEL);
+	scan_buf = (u8 *)kzalloc(ap_num * sizeof(struct rtw_scan_result), GFP_KERNEL);
 
-	llhw_send_event(INIC_API_WIFI_GET_SCANNED_AP_INFO, (u8 *)param_buf, sizeof(param_buf), (u8 *)scan_buf, ap_num * sizeof(rtw_scan_result_t));
+	llhw_send_event(INIC_API_WIFI_GET_SCANNED_AP_INFO, (u8 *)param_buf, sizeof(param_buf), (u8 *)scan_buf, ap_num * sizeof(struct rtw_scan_result));
 
 	g_scan_buf = scan_buf;
 	g_scan_ap_num = ap_num;
@@ -80,7 +80,7 @@ void llhw_sdio_bridge_get_scan_result(u32 ap_num)
 
 void llhw_sdio_bridge_event_join_status_indicate(void *event_priv, u32 *param_buf)
 {
-	enum rtw_event_indicate event = (enum rtw_event_indicate)param_buf[0];
+	u32 event = (u32)param_buf[0];
 	int flags = (int)param_buf[1];
 	struct mlme_priv_t *mlme_priv = &global_idev.mlme_priv;
 
@@ -99,16 +99,14 @@ void llhw_sdio_bridge_event_join_status_indicate(void *event_priv, u32 *param_bu
 			if (mlme_priv->join_block_param && mlme_priv->join_block_param->block) {
 				complete(&mlme_priv->join_block_param->join_sema);
 			}
-		}
-	} else if (event == WIFI_EVENT_DISCONNECT) {
-		if (global_idev.mlme_priv.b_in_disconnect) {
-			complete(&global_idev.mlme_priv.disconnect_done_sema);
-			global_idev.mlme_priv.b_in_disconnect = false;
-		}
-		if (global_idev.mlme_priv.rtw_join_status == RTW_JOINSTATUS_DISCONNECT) {
+		} else if (flags == RTW_JOINSTATUS_DISCONNECT) {
+			if (global_idev.mlme_priv.b_in_disconnect) {
+				complete(&global_idev.mlme_priv.disconnect_done_sema);
+				global_idev.mlme_priv.b_in_disconnect = false;
+			}
 			netif_carrier_off(global_idev.pndev[0]);
+			rtw_sdio_bridge_wifi_event_indicate(&wifi_event_user_genl_info, BRIDGE_WIFI_EVENT_DISCONNECT);
 		}
-		rtw_sdio_bridge_wifi_event_indicate(&wifi_event_user_genl_info, BRIDGE_WIFI_EVENT_DISCONNECT);
 	}
 
 	return;
@@ -147,7 +145,7 @@ static int rtw_sdio_bridge_cmd_process(struct sk_buff *skb, struct genl_info *in
 		rtw_sdio_bridge_getip_rsp(info);
 	} else if (cmd == CMD_WIFI_SCAN) {
 		memset(&scan_param, 0, sizeof(struct _rtw_scan_param_t));
-		scan_param.scan_user_callback = (enum _rtw_result_t(*)(unsigned int, void *))0xFFFFFFFF;
+		scan_param.scan_user_callback = (int(*)(unsigned int, void *))0xFFFFFFFF;
 		llhw_wifi_scan(&scan_param, 0, 0);
 		if (wait_for_completion_timeout(&event_priv->bridge_scan_done_sema, msecs_to_jiffies(20000)) == 0) {
 			dev_err(global_idev.fullmac_dev, "wait scan done timeout\n");
@@ -266,7 +264,7 @@ void rtw_sdio_bridge_scanres_rsp(struct genl_info *info)
 	if (info->attrs[BRIDGE_ATTR_SCAN_RES_ADDR]) {
 		userbuf = nla_get_u64(info->attrs[BRIDGE_ATTR_SCAN_RES_ADDR]);
 		if (g_scan_buf) {
-			copy_to_user((void *)userbuf, g_scan_buf, g_scan_ap_num * sizeof(rtw_scan_result_t));
+			copy_to_user((void *)userbuf, g_scan_buf, g_scan_ap_num * sizeof(struct rtw_scan_result));
 		}
 	}
 

@@ -22,7 +22,7 @@ else
     ANALYZE_MP_IMG = 0
 endif
 #ROM_SYMBOL_GEN_PYTHON=$(shell $(ABS_ROOTDIR)/img_utility/export_rom_symbol.py)
-#ROM_SYMBOL_GEN_PYTHON= 
+#ROM_SYMBOL_GEN_PYTHON=
 include $(MAKE_INCLUDE_GEN)
 
 # Verbose flag
@@ -60,8 +60,8 @@ RAM_OBJS_LIST = ./build/ram/*.o
 ROM_OBJS_LIST = ./build/rom/*.o
 LIB_OBJS_LIST = ./build/lib/*.o
 
-LINK_ROM_LIB = 
-LINK_ROM_SYMBOL = 
+LINK_ROM_LIB =
+LINK_ROM_SYMBOL =
 LINK_APP_LIB =
 LINK_THIRD_APP_LIB =
 .PHONY: all build_target_folder menuconfig clean build_libraries make_wifi_lib
@@ -143,21 +143,27 @@ LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_vorbisdec.a
 endif
 endif
 
+ifeq ($(CONFIG_SPEEX_LIB),y)
+LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_speexdsp.a
+endif
+ifeq ($(CONFIG_OPUS_LIB),y)
+LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_opus.a
+endif
+
 ifeq ($(CONFIG_AUDIO_MIXER),y)
-LINK_APP_LIB += $(APP_LIB_DIR)/lib_audio_mixer.a
+LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_audio_mixer.a
 else ifeq ($(CONFIG_AUDIO_PASSTHROUGH),y)
-LINK_APP_LIB += $(APP_LIB_DIR)/lib_audio_passthrough.a
+LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_audio_passthrough.a
 endif
 
 ifeq ($(CONFIG_GUI_EN),y)
-ifeq ($(CONFIG_DEMO_UI_EN),y)
-LINK_APP_LIB += $(APP_LIB_DIR)/lib_ui_utils.a
-endif
-LINK_APP_LIB += $(APP_LIB_DIR)/lib_ui_drivers.a
+LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_png.a
+LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_z.a
+LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_jpg.a
 endif
 
 ifeq ($(CONFIG_AUDIO_FWK),y)
-LINK_APP_LIB += $(APP_LIB_DIR)/lib_base.a
+LINK_THIRD_APP_LIB += $(APP_LIB_DIR)/lib_base.a
 endif
 
 ifeq ($(CONFIG_IMQ_EN),y)
@@ -342,20 +348,51 @@ fip_image:
 
 	$(Q)$(IMAGETOOL) $(IMAGE_TARGET_FOLDER)/ap_image_all.bin $(BUILD_TYPE)
 
-ifeq ($(CONFIG_UPGRADE_BOOTLOADER), y)
+ifeq ($(CONFIG_FATFS_WITHIN_APP_IMG), y)
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin ] && [ -f $(BASEDIR)/amebasmart_gcc_project/fatfs.bin ]; then \
+		mv $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_tmp.bin; \
+		mv $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns.bin $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns_tmp.bin; \
+		$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_tmp.bin 4096; \
+		$(PADTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns_tmp.bin 4096; \
+		$(PREPENDTOOL) $(BASEDIR)/amebasmart_gcc_project/fatfs.bin  VFS1_FLASH_BASE_ADDR  $(AP_IMAGEDIR)/target_img2.map; \
+		cat $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_tmp.bin $(BASEDIR)/amebasmart_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin; \
+		cat $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns_tmp.bin $(BASEDIR)/amebasmart_gcc_project/fatfs_prepend.bin > $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns.bin; \
+	fi
+endif
+
+ifeq ($(CONFIG_COMPRESS_OTA_IMG), y)
 	@if [ -f $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin ]; then \
-		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all.bin; \
-		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all_ns.bin; \
+		$(COMPRESSTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin; \
+		$(COMPRESSTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns.bin; \
+		$(COPY) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_compress.bin $(KM4_BUILDDIR)/asdk/image/tmp_app.bin; \
+		$(COPY) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns_compress.bin $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin; \
 	fi
 else
 	@if [ -f $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin ]; then \
-		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin; \
-		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns.bin; \
+		$(COPY) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app.bin $(KM4_BUILDDIR)/asdk/image/tmp_app.bin; \
+		$(COPY) $(KM4_BUILDDIR)/asdk/image/km0_km4_ca32_app_ns.bin $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin; \
 	fi
 endif
+ifeq ($(CONFIG_UPGRADE_BOOTLOADER), y)
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/tmp_app.bin ]; then \
+		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/tmp_app.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all.bin; \
+		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin $(KM4_BUILDDIR)/asdk/image/km4_boot_all_ns.bin; \
+	fi
+else
+	@if [ -f $(KM4_BUILDDIR)/asdk/image/tmp_app.bin ]; then \
+		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/tmp_app.bin; \
+		$(OTAPREPENDTOOL) $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin; \
+	fi
+endif
+	@rm -f $(KM4_BUILDDIR)/asdk/image/tmp_app.bin
+	@rm -f $(KM4_BUILDDIR)/asdk/image/tmp_app_ns.bin
+
 	@rm -f $(IMAGE_TARGET_FOLDER)/*prepend.bin
 	@$(COPY) $(IMAGE_TARGET_FOLDER)/*rom* $(ROM_LIB_DIR)
-	@$(COPY) ./build/atf/bl1/{*.dump,*.elf,*.ld,*.map} $(ROM_LIB_DIR)
+	@$(COPY) ./build/atf/bl1/*.dump $(ROM_LIB_DIR)
+	@$(COPY) ./build/atf/bl1/*.elf $(ROM_LIB_DIR)
+	@$(COPY) ./build/atf/bl1/*.ld $(ROM_LIB_DIR)
+	@$(COPY) ./build/atf/bl1/*.map $(ROM_LIB_DIR)
 
 	@echo "========== Image manipulating end =========="
 
@@ -412,7 +449,7 @@ gdb: gdb_prepare
 
 	$(GNU_SCRIPT)/SetupGDB_FPGA.sh $(GNU_SCRIPT)
 	$(GDB) -x $(GNU_SCRIPT)/rtl_gdb_flash_write.txt
-	
+
 
 gdbboot: gdb_prepare
 	$(GDB) -x $(GNU_SCRIPT)/rtl_gdb_jtag_boot.txt
@@ -488,7 +525,7 @@ clean_all: clean
 #*****************************************************************************#
 copy_ld_img2:
 ifeq ($(CONFIG_XIP_FLASH), y)
-	$(Q)$(COPY) $(ROOTDIR)/ld/rlx8721d_img2_xip.ld  $(BUILD_TARGET_FOLDER)/rlx8721d.ld
+	$(Q) $(CC) -E -P -xc -c ./ld/rlx8721d_img2_xip.ld -o $(BUILD_TARGET_FOLDER)/rlx8721d.ld
 else
-	$(Q)$(COPY) $(ROOTDIR)/ld/rlx8721d_img2_dram.ld  $(BUILD_TARGET_FOLDER)/rlx8721d.ld
+	$(Q) $(CC) -E -P -xc -c ./ld/rlx8721d_img2_dram.ld -o $(BUILD_TARGET_FOLDER)/rlx8721d.ld
 endif

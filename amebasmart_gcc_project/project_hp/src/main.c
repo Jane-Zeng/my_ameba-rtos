@@ -153,6 +153,15 @@ void app_filesystem_init(void)
 #if defined(CONFIG_SINGLE_CORE_WIFI)
 	int ret = 0;
 	vfs_init();
+#ifdef CONFIG_FATFS_WITHIN_APP_IMG
+	ret = vfs_user_register("fat", VFS_FATFS, VFS_INF_FLASH, VFS_REGION_2, VFS_RO);
+	if (ret == 0) {
+		RTK_LOGI(TAG, "VFS-FAT Init Success \n");
+	} else {
+		RTK_LOGI(TAG, "VFS-FAT Init Fail \n");
+	}
+#endif
+
 	ret = vfs_user_register(VFS_PREFIX, VFS_LITTLEFS, VFS_INF_FLASH, VFS_REGION_1, VFS_RW);
 	if (ret == 0) {
 		ret = rt_kv_init();
@@ -176,14 +185,10 @@ int main(void)
 	InterruptRegister(IPC_INTHandler, IPC_NP_IRQ, (u32)IPCNP_DEV, 5);
 	InterruptEn(IPC_NP_IRQ, 5);
 
-#ifdef CONFIG_MBED_TLS_ENABLED
+#ifdef CONFIG_MBEDTLS_ENABLED
 	app_mbedtls_rom_init();
 #endif
 	//app_init_debug();
-
-	/* init console */
-	shell_init_rom(0, 0);
-	shell_init_ram();
 
 	ipc_table_init(IPCNP_DEV);
 	IPC_SEMDelayStub((void *)rtos_time_delay_ms);
@@ -203,6 +208,10 @@ int main(void)
 #ifdef CONFIG_WLAN
 	wlan_initialize();
 #endif
+
+	/* init console */
+	shell_init_rom(0, 0);
+	shell_init_ram();
 
 	//app_shared_btmem(ENABLE);
 
